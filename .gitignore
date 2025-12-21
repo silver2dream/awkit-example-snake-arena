@@ -1,0 +1,12 @@
+
+# >>> AI Workflow Kit >>>
+# Runtime state (do not commit)
+.ai/state/
+.ai/results/
+.ai/runs/
+.ai/exe-logs/
+.worktrees/
+# Claude Code local settings (do not commit)
+.claude/settings.local.json
+# <<< AI Workflow Kit <<<
+
