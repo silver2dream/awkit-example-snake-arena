@@ -723,7 +723,9 @@ WORK_DIR="$WT_DIR"  # Where codex will actually work
 
 if [[ "$REPO" != "root" ]]; then
   # For monorepo subdirectories, work inside the subdirectory
-  WORK_DIR="$WT_DIR/$REPO"
+  # Use REPO_PATH (from config) which may have trailing slash, normalize it
+  REPO_PATH_NORMALIZED="${REPO_PATH%/}"  # Remove trailing slash if present
+  WORK_DIR="$WT_DIR/$REPO_PATH_NORMALIZED"
 fi
 
 echo "[runner] preflight repo=$REPO type=$REPO_TYPE"
@@ -749,7 +751,9 @@ if [[ ! -d "$WT_DIR" ]]; then
   # Pass repo_type and repo_path to new_worktree.sh (Req 14.5)
   WT_DIR="$(bash "$MONO_ROOT/.ai/scripts/new_worktree.sh" "$ISSUE_ID" "$BRANCH" "$REPO_TYPE" "$REPO_PATH")"
   if [[ "$REPO" != "root" ]]; then
-    WORK_DIR="$WT_DIR/$REPO"
+    # Use REPO_PATH (from config) which may have trailing slash, normalize it
+    REPO_PATH_NORMALIZED="${REPO_PATH%/}"
+    WORK_DIR="$WT_DIR/$REPO_PATH_NORMALIZED"
   else
     WORK_DIR="$WT_DIR"
   fi
