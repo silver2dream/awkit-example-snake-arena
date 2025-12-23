@@ -10,6 +10,19 @@ AI_ROOT="$MONO_ROOT/.ai"
 CONFIG_FILE="$AI_ROOT/config/workflow.yaml"
 
 # ============================================================
+# Source Session and Comment Managers (Req 2.1, 4.2, 4.3)
+# ============================================================
+source "$AI_ROOT/scripts/session_manager.sh"
+source "$AI_ROOT/scripts/github_comment.sh"
+
+# ============================================================
+# Generate Worker Session ID (Req 2.1)
+# ============================================================
+WORKER_SESSION_ID=$(generate_session_id "worker")
+export WORKER_SESSION_ID
+echo "[runner] worker_session_id=$WORKER_SESSION_ID"
+
+# ============================================================
 # Repo Type Detection Functions
 # ============================================================
 # Get repo type from workflow.yaml
@@ -553,6 +566,29 @@ LOG_DIR="$MONO_ROOT/.ai/exe-logs"
 RUN_DIR="$MONO_ROOT/.ai/runs/issue-$ISSUE_ID"
 mkdir -p "$LOG_DIR" "$RUN_DIR" "$MONO_ROOT/.ai/results" "$MONO_ROOT/.ai/state" "$MONO_ROOT/.worktrees"
 
+# Define log file base early so early failures can be logged
+# This ensures log files are created even if script exits before codex execution
+CODEX_LOG_BASE="$LOG_DIR/issue-$ISSUE_ID.${REPO}.codex"
+EARLY_FAILURE_LOG="${CODEX_LOG_BASE}.early-failure.log"
+
+# Helper function to log early failures before codex execution
+log_early_failure() {
+  local stage="$1"
+  local message="$2"
+  {
+    echo "============================================================"
+    echo "EARLY FAILURE LOG - issue-$ISSUE_ID"
+    echo "============================================================"
+    echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "Stage: $stage"
+    echo "Repo: $REPO"
+    echo "Repo Type: ${REPO_TYPE:-unknown}"
+    echo "Repo Path: ${REPO_PATH:-unknown}"
+    echo "Error: $message"
+    echo "============================================================"
+  } >> "$EARLY_FAILURE_LOG"
+}
+
 # Track execution start time
 EXEC_START_TIME=$(date +%s)
 
@@ -711,6 +747,7 @@ export AI_STATE_ROOT="$MONO_ROOT"
 trace_step_start "attempt_guard"
 if ! bash "$MONO_ROOT/.ai/scripts/attempt_guard.sh" "$ISSUE_ID" "codex-auto"; then
   record_error "attempt_guard failed"
+  log_early_failure "attempt_guard" "attempt_guard.sh returned non-zero"
   trace_step_end "failed" "attempt_guard failed"
   exit 2
 fi
@@ -735,12 +772,14 @@ if [[ -n "$(git -C "$MONO_ROOT" status --porcelain)" ]]; then
   record_error "working tree not clean"
   echo "ERROR: working tree not clean. Commit/stash first." >&2
   git -C "$MONO_ROOT" status --porcelain >&2 || true
+  log_early_failure "preflight" "working tree not clean - uncommitted changes detected"
   trace_step_end "failed" "working tree not clean"
   exit 2
 fi
 # Run preflight for ALL repo types (Req 7.6, 7.7)
 if ! bash "$MONO_ROOT/.ai/scripts/preflight.sh" "$REPO_TYPE" "$REPO_PATH"; then
   record_error "preflight failed"
+  log_early_failure "preflight" "preflight.sh returned non-zero for repo_type=$REPO_TYPE repo_path=$REPO_PATH"
   trace_step_end "failed" "preflight failed"
   exit 2
 fi
@@ -764,6 +803,7 @@ if [[ ! -d "$WORK_DIR" ]]; then
   format_error "worktree_setup" "work directory not found: $WORK_DIR" \
     "Check that the repo path '$REPO_PATH' exists in the worktree"
   record_error "work directory not found: $WORK_DIR"
+  log_early_failure "worktree" "work directory not found: $WORK_DIR (expected at $WT_DIR/$REPO_PATH)"
   trace_step_end "failed" "work directory not found"
   exit 2
 fi
@@ -829,6 +869,21 @@ Your job is ONLY to:
 2. Run verification commands
 3. Report the results
 
+============================================================
+FORBIDDEN OPERATIONS (Req 3.4, 3.5)
+============================================================
+You MUST NOT:
+- Read, write, or access any files in .ai/state/principal/
+- Read, write, or access session.json or any session log files
+- Modify any files in .ai/scripts/ or .ai/commands/
+- Access or modify Principal session data
+- Forge or manipulate session IDs
+- Access audit logs or review data
+
+These paths are reserved for the Principal agent and are protected.
+Attempting to access them will result in task failure.
+============================================================
+
 Ticket:
 $(cat "$TASK_PATH")
 
@@ -839,9 +894,52 @@ After making changes:
 - Do NOT commit or push - the runner will handle that.
 PROMPT
 
-CODEX_LOG_BASE="$LOG_DIR/issue-$ISSUE_ID.${REPO}.codex"
+# CODEX_LOG_BASE already defined early in script for early failure logging
 SUMMARY_FILE="$RUN_DIR/summary.txt"
 : > "$SUMMARY_FILE"
+
+# ============================================================
+# Read previous session info for retry tracking (Req 8.1, 8.2, 8.3, 8.4)
+# ============================================================
+RESULT_FILE="$MONO_ROOT/.ai/results/issue-$ISSUE_ID.json"
+AI_ATTEMPT_NUMBER=1
+AI_PREV_SESSION_IDS="[]"
+AI_PREV_FAILURE_REASON=""
+
+if [[ -f "$RESULT_FILE" ]]; then
+  # Read previous session info
+  PREV_SESSION_ID=$(_jq -r '.session.worker_session_id // ""' "$RESULT_FILE" 2>/dev/null || echo "")
+  PREV_ATTEMPT=$(_jq -r '.session.attempt_number // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+  PREV_SESSIONS=$(_jq -c '.session.previous_session_ids // []' "$RESULT_FILE" 2>/dev/null || echo "[]")
+  
+  if [[ -n "$PREV_SESSION_ID" && "$PREV_SESSION_ID" != "null" ]]; then
+    # This is a retry - increment attempt number and add previous session to chain
+    AI_ATTEMPT_NUMBER=$((PREV_ATTEMPT + 1))
+    # Append previous session ID to the chain
+    AI_PREV_SESSION_IDS=$(echo "$PREV_SESSIONS" | _jq -c --arg sid "$PREV_SESSION_ID" '. + [$sid]')
+    # Get previous failure reason if available
+    AI_PREV_FAILURE_REASON=$(_jq -r '.session.previous_failure_reason // ""' "$RESULT_FILE" 2>/dev/null || echo "")
+    echo "[runner] retry attempt $AI_ATTEMPT_NUMBER (previous: $PREV_SESSION_ID)"
+  fi
+fi
+
+export AI_ATTEMPT_NUMBER
+export AI_PREV_SESSION_IDS
+export AI_PREV_FAILURE_REASON
+
+# ============================================================
+# Post worker_start comment to Issue (Req 4.2)
+# ============================================================
+trace_step_start "worker_start_comment"
+if command -v gh >/dev/null 2>&1; then
+  EXTRA_DATA=""
+  if [[ "$AI_ATTEMPT_NUMBER" -gt 1 ]]; then
+    EXTRA_DATA="| Attempt | $AI_ATTEMPT_NUMBER |"
+  fi
+  add_issue_comment "$ISSUE_ID" "$WORKER_SESSION_ID" "worker_start" "" "$EXTRA_DATA" 2>/dev/null || true
+  echo "[runner] posted worker_start comment to Issue #$ISSUE_ID"
+fi
+trace_step_end "success"
 
 MAX_ATTEMPTS=$((RETRY_COUNT + 1))
 ATTEMPT=0
@@ -908,6 +1006,19 @@ export AI_EXEC_DURATION="$EXEC_DURATION"
 if [[ "$RC" -ne 0 ]]; then
   record_error "codex failed rc=$RC"
   echo "[runner] codex failed rc=$RC" | tee -a "$SUMMARY_FILE"
+  
+  # ============================================================
+  # Extract failure reason for retry tracking (Req 8.3)
+  # ============================================================
+  AI_FAILURE_REASON=""
+  if [[ -f "$CODEX_LOG" ]]; then
+    AI_FAILURE_REASON=$(tail -n 50 "$CODEX_LOG" | grep -iE "ERROR|FAILED|Exception|error:" | head -n 5 | tr '\n' ' ' || echo "Unknown error")
+  fi
+  if [[ -z "$AI_FAILURE_REASON" ]]; then
+    AI_FAILURE_REASON="codex exit code $RC"
+  fi
+  export AI_FAILURE_REASON
+  
   export AI_RESULTS_ROOT="$MONO_ROOT"
   export AI_REPO_NAME="$REPO"
   export AI_BRANCH_NAME="$BRANCH"
@@ -919,6 +1030,20 @@ if [[ "$RC" -ne 0 ]]; then
     exit "$RC"
   fi
   trace_step_end "success"
+  
+  # ============================================================
+  # Post worker_complete (failed) comment to Issue (Req 4.3)
+  # ============================================================
+  trace_step_start "worker_complete_comment"
+  if command -v gh >/dev/null 2>&1; then
+    EXTRA_DATA="| Status | failed |
+| Duration | $(format_duration "$AI_EXEC_DURATION") |
+| Exit Code | $RC |"
+    add_issue_comment "$ISSUE_ID" "$WORKER_SESSION_ID" "worker_complete" "" "$EXTRA_DATA" 2>/dev/null || true
+    echo "[runner] posted worker_complete (failed) comment to Issue #$ISSUE_ID"
+  fi
+  trace_step_end "success"
+  
   exit "$RC"
 fi
 
@@ -1128,6 +1253,17 @@ trace_step_start "write_result"
 if ! bash "$MONO_ROOT/.ai/scripts/write_result.sh" "$ISSUE_ID" "success" "$PR_URL" "$SUMMARY_FILE"; then
   trace_step_end "failed" "write_result failed"
   exit 2
+fi
+trace_step_end "success"
+
+# ============================================================
+# Post worker_complete comment to Issue (Req 4.3)
+# ============================================================
+trace_step_start "worker_complete_comment"
+if command -v gh >/dev/null 2>&1; then
+  EXTRA_DATA=$(build_worker_complete_extra "$PR_URL" "$AI_EXEC_DURATION")
+  add_issue_comment "$ISSUE_ID" "$WORKER_SESSION_ID" "worker_complete" "" "$EXTRA_DATA" 2>/dev/null || true
+  echo "[runner] posted worker_complete comment to Issue #$ISSUE_ID"
 fi
 trace_step_end "success"
 
