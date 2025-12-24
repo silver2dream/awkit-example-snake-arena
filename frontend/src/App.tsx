@@ -1,8 +1,11 @@
+import LobbyView from './features/lobby/LobbyView'
+import './App.css'
+
 function App() {
   return (
-    <div>
-      <h1>Hello, World!</h1>
-    </div>
+    <main className="app">
+      <LobbyView />
+    </main>
   )
 }
 
