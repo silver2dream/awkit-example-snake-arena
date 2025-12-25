@@ -2,7 +2,9 @@ package game
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +33,13 @@ type TickPayload struct {
 
 // RoomConfig defines defaults for new rooms.
 type RoomConfig struct {
-	TickInterval time.Duration
-	Grid         Grid
-	Seed         int64
+	TickInterval  time.Duration
+	Grid          Grid
+	Seed          int64
+	MaxClients    int
+	MaxMessages   int
+	MessageWindow time.Duration
+	InputThrottle time.Duration
 }
 
 // RoomManager manages room lifecycle and acts as the HTTP handler.
@@ -41,6 +47,16 @@ type RoomManager struct {
 	mu     sync.Mutex
 	rooms  map[string]*Room
 	config RoomConfig
+}
+
+var roomIDPattern = regexp.MustCompile(`^[A-Z0-9]{6}$`)
+
+const defaultSnakeID = "snake-1"
+
+type clientLimits struct {
+	maxMessages   int
+	window        time.Duration
+	inputThrottle time.Duration
 }
 
 // NewRoomManager constructs a manager with sane defaults.
@@ -53,6 +69,18 @@ func NewRoomManager(config RoomConfig) *RoomManager {
 	}
 	if config.Seed == 0 {
 		config.Seed = 1
+	}
+	if config.MaxClients <= 0 {
+		config.MaxClients = 8
+	}
+	if config.MaxMessages <= 0 {
+		config.MaxMessages = 30
+	}
+	if config.MessageWindow <= 0 {
+		config.MessageWindow = time.Second
+	}
+	if config.InputThrottle <= 0 {
+		config.InputThrottle = 50 * time.Millisecond
 	}
 
 	return &RoomManager{
@@ -73,10 +101,14 @@ func (m *RoomManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roomID := strings.TrimPrefix(r.URL.Path, "/ws/rooms/")
-	roomID = strings.Trim(roomID, "/")
-	if roomID == "" {
-		http.Error(w, "room id required", http.StatusBadRequest)
+	roomID, err := normalizeRoomID(strings.TrimPrefix(r.URL.Path, "/ws/rooms/"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if m.roomAtCapacity(roomID) {
+		http.Error(w, "room is full", http.StatusTooManyRequests)
 		return
 	}
 
@@ -87,7 +119,24 @@ func (m *RoomManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room := m.getOrCreateRoom(roomID)
+	if room.isAtCapacity() {
+		_ = conn.WriteClose()
+		return
+	}
 	room.addClient(conn)
+}
+
+func normalizeRoomID(raw string) (string, error) {
+	trimmed := strings.Trim(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return "", errors.New("room id required")
+	}
+
+	normalized := strings.ToUpper(trimmed)
+	if !roomIDPattern.MatchString(normalized) {
+		return "", errors.New("invalid room id format")
+	}
+	return normalized, nil
 }
 
 // Shutdown stops all active rooms.
@@ -105,8 +154,22 @@ func (m *RoomManager) Shutdown() {
 	}
 }
 
+func (m *RoomManager) roomAtCapacity(roomID string) bool {
+	m.mu.Lock()
+	room := m.rooms[roomID]
+	m.mu.Unlock()
+	if room == nil {
+		return false
+	}
+	return room.isAtCapacity()
+}
+
 // RoomClientCount returns the number of clients in a room (primarily for tests).
 func (m *RoomManager) RoomClientCount(roomID string) int {
+	roomID, err := normalizeRoomID(roomID)
+	if err != nil {
+		return 0
+	}
 	m.mu.Lock()
 	room := m.rooms[roomID]
 	m.mu.Unlock()
@@ -148,6 +211,8 @@ type Room struct {
 	state        *GameState
 	tickInterval time.Duration
 	clients      map[*client]struct{}
+	maxClients   int
+	limits       clientLimits
 	mu           sync.RWMutex
 	stop         chan struct{}
 	stopOnce     sync.Once
@@ -155,12 +220,20 @@ type Room struct {
 }
 
 func newRoom(id string, config RoomConfig, onEmpty func(string)) *Room {
+	limits := clientLimits{
+		maxMessages:   config.MaxMessages,
+		window:        config.MessageWindow,
+		inputThrottle: config.InputThrottle,
+	}
+
 	room := &Room{
 		id:           id,
 		engine:       NewTickEngine(config.Seed + int64(len(id))),
 		state:        defaultState(config.Grid),
 		tickInterval: config.TickInterval,
 		clients:      make(map[*client]struct{}),
+		maxClients:   config.MaxClients,
+		limits:       limits,
 		stop:         make(chan struct{}),
 		onEmpty:      onEmpty,
 	}
@@ -184,6 +257,11 @@ func (r *Room) run() {
 }
 
 func (r *Room) addClient(conn *ws.Conn) {
+	if r.isAtCapacity() {
+		_ = conn.WriteClose()
+		return
+	}
+
 	client := newClient(r, conn)
 
 	r.mu.Lock()
@@ -284,6 +362,36 @@ func (r *Room) ClientCount() int {
 	return len(r.clients)
 }
 
+func (r *Room) isAtCapacity() bool {
+	if r.maxClients <= 0 {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.clients) >= r.maxClients
+}
+
+func (r *Room) applyDirectionChange(direction Direction) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state == nil {
+		return errors.New("room not ready")
+	}
+
+	snake, ok := r.state.Snakes[defaultSnakeID]
+	if !ok || snake == nil {
+		return errors.New("snake not found")
+	}
+
+	if !snake.Alive {
+		return errors.New("snake is not alive")
+	}
+
+	snake.Direction = direction
+	return nil
+}
+
 func (r *Room) copyClientsLocked() []*client {
 	clients := make([]*client, 0, len(r.clients))
 	for c := range r.clients {
@@ -297,12 +405,11 @@ func defaultState(grid Grid) *GameState {
 		grid = Grid{Width: 15, Height: 15}
 	}
 
-	snakeID := "snake-1"
 	return &GameState{
 		Grid: grid,
 		Snakes: map[string]*Snake{
-			snakeID: {
-				ID:        snakeID,
+			defaultSnakeID: {
+				ID:        defaultSnakeID,
 				Body:      []Position{{X: 1, Y: 1}},
 				Direction: DirectionRight,
 				Alive:     true,

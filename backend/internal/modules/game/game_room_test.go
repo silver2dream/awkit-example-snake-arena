@@ -22,7 +22,7 @@ func TestWebSocketRoomLifecycle(t *testing.T) {
 	})
 	defer manager.Shutdown()
 
-	conn, reader := openWebSocket(t, manager, "/ws/rooms/test-room")
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/ROOM01")
 	defer conn.Close()
 
 	first := readEnvelope(t, conn, reader)
@@ -34,22 +34,22 @@ func TestWebSocketRoomLifecycle(t *testing.T) {
 	var payload TickPayload
 	decodeData(t, tick.Data, &payload)
 
-	if payload.RoomID != "test-room" {
-		t.Fatalf("expected room id test-room, got %s", payload.RoomID)
+	if payload.RoomID != "ROOM01" {
+		t.Fatalf("expected room id ROOM01, got %s", payload.RoomID)
 	}
 
 	if payload.State == nil || len(payload.State.Snakes) == 0 {
 		t.Fatalf("expected a populated state snapshot, got %+v", payload.State)
 	}
 
-	if got := manager.RoomClientCount("test-room"); got != 1 {
+	if got := manager.RoomClientCount("ROOM01"); got != 1 {
 		t.Fatalf("expected 1 client registered, got %d", got)
 	}
 
 	_ = conn.Close()
 	time.Sleep(50 * time.Millisecond)
 
-	if got := manager.RoomClientCount("test-room"); got != 0 {
+	if got := manager.RoomClientCount("ROOM01"); got != 0 {
 		t.Fatalf("expected client to be removed after close, got %d", got)
 	}
 }
@@ -62,9 +62,9 @@ func TestBroadcastTickToMultipleClients(t *testing.T) {
 	})
 	defer manager.Shutdown()
 
-	connA, readerA := openWebSocket(t, manager, "/ws/rooms/shared")
+	connA, readerA := openWebSocket(t, manager, "/ws/rooms/SHARED")
 	defer connA.Close()
-	connB, readerB := openWebSocket(t, manager, "/ws/rooms/shared")
+	connB, readerB := openWebSocket(t, manager, "/ws/rooms/SHARED")
 	defer connB.Close()
 
 	_ = readEnvelope(t, connA, readerA) // snapshot
@@ -77,12 +77,138 @@ func TestBroadcastTickToMultipleClients(t *testing.T) {
 	decodeData(t, tickA.Data, &payloadA)
 	decodeData(t, tickB.Data, &payloadB)
 
-	if payloadA.RoomID != "shared" || payloadB.RoomID != "shared" {
-		t.Fatalf("expected room id shared, got %s and %s", payloadA.RoomID, payloadB.RoomID)
+	if payloadA.RoomID != "SHARED" || payloadB.RoomID != "SHARED" {
+		t.Fatalf("expected room id SHARED, got %s and %s", payloadA.RoomID, payloadB.RoomID)
 	}
 
 	if len(payloadA.State.Snakes) == 0 || len(payloadB.State.Snakes) == 0 {
 		t.Fatalf("expected state to include snakes")
+	}
+}
+
+func TestInvalidRoomIDIsRejected(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{})
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/ws/rooms/short", nil)
+	rr := httptest.NewRecorder()
+
+	manager.ServeHTTP(rr, req)
+
+	if rr.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for invalid room id, got %d", rr.Result().StatusCode)
+	}
+}
+
+func TestRoomCapacityLimit(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		MaxClients:   1,
+		TickInterval: time.Hour,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/FULL01")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/ws/rooms/FULL01", nil)
+	rr := httptest.NewRecorder()
+	manager.ServeHTTP(rr, req)
+
+	if rr.Result().StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected status 429 when room is full, got %d", rr.Result().StatusCode)
+	}
+}
+
+func TestInvalidInputYieldsError(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		TickInterval: time.Hour,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/INPUT1")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	writeClientTextFrame(t, conn, []byte("not-json"))
+
+	env := readEnvelope(t, conn, reader)
+	if env.Type != "error" {
+		t.Fatalf("expected error envelope, got %s", env.Type)
+	}
+
+	var payload map[string]string
+	decodeData(t, env.Data, &payload)
+
+	if payload["code"] != "bad_request" {
+		t.Fatalf("expected bad_request code, got %+v", payload)
+	}
+}
+
+func TestRateLimitingPreventsFlood(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		TickInterval:  time.Hour,
+		MaxMessages:   2,
+		MessageWindow: 100 * time.Millisecond,
+		InputThrottle: time.Nanosecond,
+		MaxClients:    2,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/RATE01")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	payload := []byte(`{"type":"input","data":{"direction":"up"}}`)
+	writeClientTextFrame(t, conn, payload)
+	writeClientTextFrame(t, conn, payload)
+	writeClientTextFrame(t, conn, payload)
+
+	foundRateLimit := false
+	for i := 0; i < 2; i++ {
+		env := readEnvelope(t, conn, reader)
+		if env.Type != "error" {
+			t.Fatalf("expected error envelope, got %s", env.Type)
+		}
+
+		var payloadData map[string]string
+		decodeData(t, env.Data, &payloadData)
+
+		if payloadData["code"] == "rate_limit" {
+			foundRateLimit = true
+			break
+		}
+	}
+
+	if !foundRateLimit {
+		t.Fatalf("expected to receive a rate_limit error after flooding")
+	}
+}
+
+func TestInputThrottleBlocksRapidCommands(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		TickInterval:  time.Hour,
+		InputThrottle: 50 * time.Millisecond,
+		MaxMessages:   5,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/THROT1")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	payload := []byte(`{"type":"input","data":{"direction":"left"}}`)
+	writeClientTextFrame(t, conn, payload)
+	writeClientTextFrame(t, conn, payload)
+
+	env := readEnvelope(t, conn, reader)
+	if env.Type != "error" {
+		t.Fatalf("expected error envelope, got %s", env.Type)
+	}
+
+	var payloadData map[string]string
+	decodeData(t, env.Data, &payloadData)
+
+	if payloadData["code"] != "throttled" {
+		t.Fatalf("expected throttled code, got %+v", payloadData)
 	}
 }
 
@@ -133,6 +259,40 @@ func openWebSocket(t *testing.T, manager *RoomManager, path string) (net.Conn, *
 	_ = clientConn.SetReadDeadline(time.Time{})
 	<-done
 	return clientConn, reader
+}
+
+func writeClientTextFrame(t *testing.T, conn net.Conn, payload []byte) {
+	t.Helper()
+
+	maskKey := [4]byte{0x11, 0x22, 0x33, 0x44}
+	header := []byte{0x81}
+	length := len(payload)
+	length64 := uint64(length)
+
+	switch {
+	case length <= 125:
+		header = append(header, byte(0x80|byte(length)))
+	case length <= 65535:
+		header = append(header, 0x80|126, byte(length>>8), byte(length))
+	default:
+		header = append(header, 0x80|127,
+			byte(length64>>56), byte(length64>>48), byte(length64>>40), byte(length64>>32),
+			byte(length64>>24), byte(length64>>16), byte(length64>>8), byte(length64))
+	}
+
+	masked := make([]byte, length)
+	for i := 0; i < length; i++ {
+		masked[i] = payload[i] ^ maskKey[i%4]
+	}
+
+	frame := append(header, maskKey[:]...)
+	frame = append(frame, masked...)
+
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	_ = conn.SetWriteDeadline(time.Time{})
 }
 
 func verifyHandshake(t *testing.T, reader *bufio.Reader) {
