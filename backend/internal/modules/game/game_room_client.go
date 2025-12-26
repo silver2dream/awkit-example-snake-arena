@@ -11,25 +11,27 @@ import (
 )
 
 type client struct {
-	room          *Room
-	conn          *ws.Conn
-	send          chan []byte
-	done          chan struct{}
-	once          sync.Once
-	limiter       *rateLimiter
-	lastInput     time.Time
-	inputThrottle time.Duration
+	room            *Room
+	conn            *ws.Conn
+	send            chan []byte
+	done            chan struct{}
+	once            sync.Once
+	limiter         *rateLimiter
+	lastInput       time.Time
+	inputThrottle   time.Duration
+	maxPayloadBytes int
 }
 
 func newClient(room *Room, conn *ws.Conn) *client {
 	limiter := newRateLimiter(room.limits.maxMessages, room.limits.window)
 	return &client{
-		room:          room,
-		conn:          conn,
-		send:          make(chan []byte, 16),
-		done:          make(chan struct{}),
-		limiter:       limiter,
-		inputThrottle: room.limits.inputThrottle,
+		room:            room,
+		conn:            conn,
+		send:            make(chan []byte, 16),
+		done:            make(chan struct{}),
+		limiter:         limiter,
+		inputThrottle:   room.limits.inputThrottle,
+		maxPayloadBytes: room.limits.maxPayloadBytes,
 	}
 }
 
@@ -42,6 +44,9 @@ func (c *client) readLoop() {
 	for {
 		opcode, payload, err := c.conn.Read()
 		if err != nil {
+			if errors.Is(err, ws.ErrFrameTooLarge) {
+				c.sendError("bad_request", "payload too large")
+			}
 			break
 		}
 		switch opcode {
@@ -51,6 +56,10 @@ func (c *client) readLoop() {
 		case ws.OpPing:
 			_ = c.conn.WritePong(payload)
 		case ws.OpText:
+			if c.maxPayloadBytes > 0 && len(payload) > c.maxPayloadBytes {
+				c.sendError("bad_request", "payload too large")
+				continue
+			}
 			if c.limiter != nil && !c.limiter.Allow(time.Now()) {
 				c.sendError("rate_limit", "too many messages, slow down")
 				continue
@@ -90,21 +99,45 @@ func (c *client) close() {
 }
 
 func (c *client) handleTextMessage(payload []byte) error {
-	var msg struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
+	msg, err := decodeInboundMessage(payload)
+	if err != nil {
+		return err
 	}
 
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		return errors.New("invalid message format")
-	}
-
-	switch strings.ToLower(msg.Type) {
+	switch msg.Type {
 	case "input":
 		return c.handleInputCommand(msg.Data)
 	default:
 		return errors.New("unsupported message type")
 	}
+}
+
+type inboundMessage struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
+}
+
+func decodeInboundMessage(payload []byte) (inboundMessage, error) {
+	if len(payload) == 0 {
+		return inboundMessage{}, errors.New("message payload required")
+	}
+
+	var msg inboundMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return inboundMessage{}, errors.New("invalid message format")
+	}
+
+	msg.Type = strings.TrimSpace(msg.Type)
+	if msg.Type == "" {
+		return inboundMessage{}, errors.New("message type is required")
+	}
+
+	if len(msg.Data) == 0 {
+		return inboundMessage{}, errors.New("message data is required")
+	}
+
+	msg.Type = strings.ToLower(msg.Type)
+	return msg, nil
 }
 
 func (c *client) handleInputCommand(raw json.RawMessage) error {

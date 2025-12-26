@@ -198,6 +198,7 @@ func TestInputThrottleBlocksRapidCommands(t *testing.T) {
 	payload := []byte(`{"type":"input","data":{"direction":"left"}}`)
 	writeClientTextFrame(t, conn, payload)
 	writeClientTextFrame(t, conn, payload)
+	writeClientTextFrame(t, conn, payload)
 
 	env := readEnvelope(t, conn, reader)
 	if env.Type != "error" {
@@ -209,6 +210,58 @@ func TestInputThrottleBlocksRapidCommands(t *testing.T) {
 
 	if payloadData["code"] != "throttled" {
 		t.Fatalf("expected throttled code, got %+v", payloadData)
+	}
+}
+
+func TestRoomLimitPreventsNewRooms(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		TickInterval: time.Hour,
+		MaxRooms:     1,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/LIMIT1")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/ws/rooms/LIMIT2", nil)
+	rr := httptest.NewRecorder()
+
+	manager.ServeHTTP(rr, req)
+
+	if rr.Result().StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected status 429 when room limit exceeded, got %d", rr.Result().StatusCode)
+	}
+}
+
+func TestInputPayloadTooLargeIsRejected(t *testing.T) {
+	manager := NewRoomManager(RoomConfig{
+		TickInterval:    time.Hour,
+		MaxMessageBytes: 32,
+	})
+	defer manager.Shutdown()
+
+	conn, reader := openWebSocket(t, manager, "/ws/rooms/SIZE01")
+	defer conn.Close()
+	_ = readEnvelope(t, conn, reader)
+
+	oversized := `{"type":"input","data":{"direction":"up","padding":"` + strings.Repeat("x", 64) + `"}}`
+	writeClientTextFrame(t, conn, []byte(oversized))
+
+	env := readEnvelope(t, conn, reader)
+	if env.Type != "error" {
+		t.Fatalf("expected error envelope for oversized payload, got %s", env.Type)
+	}
+
+	var payloadData map[string]string
+	decodeData(t, env.Data, &payloadData)
+
+	if payloadData["code"] != "bad_request" {
+		t.Fatalf("expected bad_request code, got %+v", payloadData)
+	}
+
+	if !strings.Contains(payloadData["message"], "payload too large") {
+		t.Fatalf("expected payload too large message, got %+v", payloadData)
 	}
 }
 

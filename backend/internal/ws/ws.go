@@ -20,7 +20,13 @@ const (
 	OpPong  byte = 0xA
 )
 
-const websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+// ErrFrameTooLarge is returned when a client frame exceeds the configured limit.
+var ErrFrameTooLarge = errors.New("websocket frame exceeds limit")
+
+const (
+	websocketGUID   = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxFramePayload = 4 * 1024
+)
 
 // Conn is a minimal WebSocket connection that supports text frames,
 // ping/pong, and close frames. It intentionally avoids third-party
@@ -192,7 +198,11 @@ func readFrame(r *bufio.Reader) (byte, []byte, error) {
 		}
 	}
 
-	payload := make([]byte, length)
+	if maxFramePayload > 0 && length > int64(maxFramePayload) {
+		return 0, nil, ErrFrameTooLarge
+	}
+
+	payload := make([]byte, int(length))
 	if length > 0 {
 		if _, err := io.ReadFull(r, payload); err != nil {
 			return 0, nil, err

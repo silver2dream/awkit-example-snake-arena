@@ -33,13 +33,15 @@ type TickPayload struct {
 
 // RoomConfig defines defaults for new rooms.
 type RoomConfig struct {
-	TickInterval  time.Duration
-	Grid          Grid
-	Seed          int64
-	MaxClients    int
-	MaxMessages   int
-	MessageWindow time.Duration
-	InputThrottle time.Duration
+	TickInterval    time.Duration
+	Grid            Grid
+	Seed            int64
+	MaxClients      int
+	MaxRooms        int
+	MaxMessages     int
+	MaxMessageBytes int
+	MessageWindow   time.Duration
+	InputThrottle   time.Duration
 }
 
 // RoomManager manages room lifecycle and acts as the HTTP handler.
@@ -54,9 +56,10 @@ var roomIDPattern = regexp.MustCompile(`^[A-Z0-9]{6}$`)
 const defaultSnakeID = "snake-1"
 
 type clientLimits struct {
-	maxMessages   int
-	window        time.Duration
-	inputThrottle time.Duration
+	maxMessages     int
+	window          time.Duration
+	inputThrottle   time.Duration
+	maxPayloadBytes int
 }
 
 // NewRoomManager constructs a manager with sane defaults.
@@ -81,6 +84,12 @@ func NewRoomManager(config RoomConfig) *RoomManager {
 	}
 	if config.InputThrottle <= 0 {
 		config.InputThrottle = 50 * time.Millisecond
+	}
+	if config.MaxRooms <= 0 {
+		config.MaxRooms = 128
+	}
+	if config.MaxMessageBytes <= 0 {
+		config.MaxMessageBytes = 2048
 	}
 
 	return &RoomManager{
@@ -107,6 +116,11 @@ func (m *RoomManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if m.roomLimitReached(roomID) {
+		http.Error(w, "room limit reached", http.StatusTooManyRequests)
+		return
+	}
+
 	if m.roomAtCapacity(roomID) {
 		http.Error(w, "room is full", http.StatusTooManyRequests)
 		return
@@ -118,7 +132,11 @@ func (m *RoomManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	room := m.getOrCreateRoom(roomID)
+	room, err := m.getOrCreateRoom(roomID)
+	if err != nil {
+		_ = conn.WriteClose()
+		return
+	}
 	if room.isAtCapacity() {
 		_ = conn.WriteClose()
 		return
@@ -154,6 +172,21 @@ func (m *RoomManager) Shutdown() {
 	}
 }
 
+func (m *RoomManager) roomLimitReached(roomID string) bool {
+	if m.config.MaxRooms <= 0 {
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.rooms[roomID]; exists {
+		return false
+	}
+
+	return len(m.rooms) >= m.config.MaxRooms
+}
+
 func (m *RoomManager) roomAtCapacity(roomID string) bool {
 	m.mu.Lock()
 	room := m.rooms[roomID]
@@ -179,17 +212,21 @@ func (m *RoomManager) RoomClientCount(roomID string) int {
 	return room.ClientCount()
 }
 
-func (m *RoomManager) getOrCreateRoom(roomID string) *Room {
+func (m *RoomManager) getOrCreateRoom(roomID string) (*Room, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if room, ok := m.rooms[roomID]; ok {
-		return room
+		return room, nil
+	}
+
+	if m.config.MaxRooms > 0 && len(m.rooms) >= m.config.MaxRooms {
+		return nil, errors.New("room limit reached")
 	}
 
 	room := newRoom(roomID, m.config, m.handleRoomEmpty)
 	m.rooms[roomID] = room
-	return room
+	return room, nil
 }
 
 func (m *RoomManager) handleRoomEmpty(roomID string) {
@@ -221,9 +258,10 @@ type Room struct {
 
 func newRoom(id string, config RoomConfig, onEmpty func(string)) *Room {
 	limits := clientLimits{
-		maxMessages:   config.MaxMessages,
-		window:        config.MessageWindow,
-		inputThrottle: config.InputThrottle,
+		maxMessages:     config.MaxMessages,
+		window:          config.MessageWindow,
+		inputThrottle:   config.InputThrottle,
+		maxPayloadBytes: config.MaxMessageBytes,
 	}
 
 	room := &Room{
