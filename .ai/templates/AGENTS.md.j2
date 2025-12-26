@@ -20,10 +20,26 @@ Default priority: correctness > minimal diff > speed.
 
 ## MUST-READ (before any work)
 
+{% set kit_rules = rules.kit | default([]) %}
+{% set custom_rules = rules.custom | default([]) %}
+{% set repo_rules = [] %}
+{% for repo in repos %}
+{% for rule in repo.rules | default([]) %}
+{% if rule not in repo_rules %}
+{% set _ = repo_rules.append(rule) %}
+{% endif %}
+{% endfor %}
+{% endfor %}
 
-- Read and obey: `.ai/rules/_kit/git-workflow.md` (CRITICAL for commit format)
-- Read and obey: `.ai/rules/backend-go.md`
-- Read and obey: `.ai/rules/frontend-react.md`
+{# Kit core rules (from _kit/ directory) #}
+{% for rule in kit_rules %}
+- Read and obey: `.ai/rules/_kit/{{ rule }}.md`{% if rule == 'git-workflow' %} (CRITICAL for commit format){% endif %}
+
+{% endfor %}
+{# User custom rules (from rules/ directory) #}
+{% for rule in custom_rules %}
+- Read and obey: `.ai/rules/{{ rule }}.md`
+{% endfor %}
 
 Do not proceed if these files are missing—stop and report what you cannot find.
 
@@ -92,11 +108,9 @@ AWK supports three repository types configured in `.ai/config/workflow.yaml`:
 
 ## DEFAULT VERIFY COMMANDS
 
-### backend
-- Build: `go build ./...`
-- Test: `go test ./...`
+{% for repo in repos %}
+### {{ repo.name }}
+- Build: `{{ repo.verify.build }}`
+- Test: `{{ repo.verify.test }}`
 
-### frontend
-- Build: `npm run build`
-- Test: `npm run test -- --run`
-
+{% endfor %}
