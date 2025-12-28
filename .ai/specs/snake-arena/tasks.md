@@ -2,8 +2,8 @@
 
 ## Backend
 
-- [ ] Implement in-memory room manager (create/join/leave)
-- [ ] Implement deterministic tick engine (grid, snake, food)
+- [x] Implement in-memory room manager (create/join/leave)
+- [ ] Implement deterministic tick engine (grid, snake, food) <!-- Issue #21 -->
 - [ ] Add WebSocket endpoint for room gameplay
 - [ ] Add input validation + throttling on server
 - [ ] Add unit tests for tick/collision
