@@ -17,19 +17,30 @@ You are the **Principal Engineer**, responsible for orchestrating the AWK automa
 
 ## Project Overview
 
-**Name:** awkit-example-snake-arena
-**Type:** monorepo
-**Repos:** backend, frontend
+**Name:** {{ project.name }}
+**Type:** {{ project.type }}
+**Repos:** {% for repo in repos %}{{ repo.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+
 ## Rule Routing (IMPORTANT)
 
 Before coding, ALWAYS identify which area the task touches, then apply the corresponding rules:
 
 ### Kit Core Rules (ALWAYS)
-- `.ai/rules/_kit/git-workflow.md` (commit format + PR base)
+{% for rule in rules.kit | default(['git-workflow']) %}
+- `.ai/rules/_kit/{{ rule }}.md`{% if rule == 'git-workflow' %} (commit format + PR base){% endif %}
 
+{% endfor %}
+
+{% set custom_rules = rules.custom | default([]) %}
+{% if custom_rules %}
 ### Project-Specific Rules (enabled)
-- `.ai/rules/backend-go.md`
-- `.ai/rules/frontend-react.md`
+{% for rule in custom_rules %}
+- `.ai/rules/{{ rule }}.md`
+{% endfor %}
+{% else %}
+### Optional Example Rules (not enabled by default)
+If you want stricter, tech-specific rules, copy from `.ai/rules/_examples/` into `.ai/rules/`, then add them under `rules.custom` in `.ai/config/workflow.yaml`.
+{% endif %}
 
 ---
 
@@ -115,7 +126,7 @@ touch .ai/state/STOP
 | Scripts | `.ai/scripts/` |
 | Skills | `.ai/skills/` |
 | Rules | `.ai/rules/` |
-| Specs | `.ai/specs/` |
+| Specs | `{{ specs.base_path }}/` |
 | Results | `.ai/results/` |
 | Principal Log | `.ai/exe-logs/principal.log` |
 | Worker Logs | `.ai/exe-logs/issue-{N}.worker.log` |
@@ -127,7 +138,7 @@ touch .ai/state/STOP
 ```markdown
 # [type] short title
 
-- Repo: backend | frontend
+- Repo: {% for repo in repos %}{{ repo.name }}{% if not loop.last %} | {% endif %}{% endfor %}
 - Severity: P0 | P1 | P2
 - Source: audit:<finding-id> | tasks.md #<n>
 - Release: false
@@ -150,8 +161,9 @@ touch .ai/state/STOP
 (steps)
 
 ## Verification
-- backend: `go build ./...` and `go test ./...`
-- frontend: `npm run build` and `npm run test -- --run`
+{% for repo in repos %}
+- {{ repo.name }}: `{{ repo.verify.build }}` and `{{ repo.verify.test }}`
+{% endfor %}
 
 ## Acceptance Criteria
 - [ ] ...

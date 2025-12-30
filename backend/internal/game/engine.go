@@ -3,6 +3,7 @@ package game
 import (
 	"errors"
 	"math/rand"
+	"strings"
 )
 
 var (
@@ -202,4 +203,21 @@ func isOpposite(current, candidate Direction) bool {
 		current == DirectionDown && candidate == DirectionUp ||
 		current == DirectionLeft && candidate == DirectionRight ||
 		current == DirectionRight && candidate == DirectionLeft
+}
+
+// ParseDirection converts a user-friendly direction string into a Direction enum.
+// It accepts case-insensitive values: up, down, left, right.
+func ParseDirection(value string) (Direction, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "up":
+		return DirectionUp, true
+	case "down":
+		return DirectionDown, true
+	case "left":
+		return DirectionLeft, true
+	case "right":
+		return DirectionRight, true
+	default:
+		return Direction(0), false
+	}
 }
