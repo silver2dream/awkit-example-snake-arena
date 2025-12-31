@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -158,5 +159,268 @@ func TestDeterministicTicksWithSameSeed(t *testing.T) {
 
 	if !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatalf("expected deterministic state with identical inputs")
+	}
+}
+
+func TestNewEngineValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		width  int
+		height int
+		err    error
+	}{
+		{name: "zero width", width: 0, height: 5, err: ErrInvalidDimensions},
+		{name: "zero height", width: 5, height: 0, err: ErrInvalidDimensions},
+		{name: "no free cells", width: 1, height: 1, err: ErrNoFreeCells},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine, err := NewEngine(tt.width, tt.height, 99)
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("expected error %v, got %v", tt.err, err)
+			}
+			if engine != nil {
+				t.Fatalf("expected engine to be nil when initialization fails")
+			}
+		})
+	}
+}
+
+func TestQueueDirectionValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		direction Direction
+		gameOver  bool
+		queued    bool
+	}{
+		{name: "rejects invalid direction", direction: Direction(-1), queued: false},
+		{name: "rejects when game over", direction: DirectionLeft, gameOver: true, queued: false},
+		{name: "queues valid direction", direction: DirectionUp, queued: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine, err := NewEngine(4, 4, 7)
+			if err != nil {
+				t.Fatalf("unexpected error creating engine: %v", err)
+			}
+
+			engine.gameOver = tt.gameOver
+
+			queued := engine.QueueDirection(tt.direction)
+			if queued != tt.queued {
+				t.Fatalf("queue result mismatch: expected %v, got %v", tt.queued, queued)
+			}
+
+			if tt.queued {
+				if !engine.hasInput {
+					t.Fatalf("expected queued input to be recorded")
+				}
+				if engine.pending != tt.direction {
+					t.Fatalf("expected pending direction %v, got %v", tt.direction, engine.pending)
+				}
+				if engine.direction != DirectionRight {
+					t.Fatalf("direction should not change before advancing tick")
+				}
+			} else if engine.hasInput {
+				t.Fatalf("did not expect direction to queue when input should be rejected")
+			}
+		})
+	}
+}
+
+func TestAdvanceTickCollisionScenarios(t *testing.T) {
+	tests := []struct {
+		name             string
+		setup            func(t *testing.T) *Engine
+		steps            []Direction
+		expectedHead     func(e *Engine) Point
+		staticHead       Point
+		expectedLength   int
+		expectedScore    int
+		expectedTick     int
+		expectedGameOver bool
+		verify           func(t *testing.T, snap Snapshot)
+	}{
+		{
+			name: "snake hits wall",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(3, 3, 1)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+				engine.food = Point{X: 0, Y: 0}
+				return engine
+			},
+			steps:            []Direction{DirectionUp, DirectionUp},
+			staticHead:       Point{X: 1, Y: 0},
+			expectedLength:   1,
+			expectedScore:    0,
+			expectedTick:     1,
+			expectedGameOver: true,
+		},
+		{
+			name: "self collision",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(4, 4, 5)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				engine.snake = []Point{{1, 1}, {1, 2}, {1, 3}}
+				engine.occupied = map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 1, Y: 2}: {},
+					{X: 1, Y: 3}: {},
+				}
+				engine.direction = DirectionDown
+				engine.food = Point{X: 0, Y: 0}
+
+				return engine
+			},
+			steps:            []Direction{DirectionDown},
+			staticHead:       Point{X: 1, Y: 1},
+			expectedLength:   3,
+			expectedScore:    0,
+			expectedTick:     0,
+			expectedGameOver: true,
+		},
+		{
+			name: "collision with other snake",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(4, 4, 11)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				engine.occupied[Point{X: 3, Y: 2}] = struct{}{}
+				engine.food = Point{X: 0, Y: 0}
+
+				return engine
+			},
+			steps:            []Direction{DirectionRight},
+			staticHead:       Point{X: 2, Y: 2},
+			expectedLength:   1,
+			expectedScore:    0,
+			expectedTick:     0,
+			expectedGameOver: true,
+		},
+		{
+			name: "eats food and grows",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(5, 5, 13)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				head := engine.snake[0]
+				engine.food = Point{X: head.X + 1, Y: head.Y}
+
+				return engine
+			},
+			steps: []Direction{DirectionRight},
+			expectedHead: func(e *Engine) Point {
+				return Point{X: e.snake[0].X + 1, Y: e.snake[0].Y}
+			},
+			expectedLength:   2,
+			expectedScore:    1,
+			expectedTick:     1,
+			expectedGameOver: false,
+			verify: func(t *testing.T, snap Snapshot) {
+				for _, segment := range snap.Snake {
+					if reflect.DeepEqual(segment, snap.Food) {
+						t.Fatalf("food should not respawn on the snake")
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			engine := tt.setup(t)
+
+			expectedHead := tt.staticHead
+			if tt.expectedHead != nil {
+				expectedHead = tt.expectedHead(engine)
+			}
+
+			for _, direction := range tt.steps {
+				if ok := engine.QueueDirection(direction); !ok && !engine.gameOver {
+					t.Fatalf("failed to queue direction %v", direction)
+				}
+				engine.AdvanceTick()
+			}
+
+			snap := engine.Snapshot()
+
+			if snap.GameOver != tt.expectedGameOver {
+				t.Fatalf("game over mismatch: expected %v, got %v", tt.expectedGameOver, snap.GameOver)
+			}
+			if snap.Tick != tt.expectedTick {
+				t.Fatalf("tick mismatch: expected %d, got %d", tt.expectedTick, snap.Tick)
+			}
+			if len(snap.Snake) != tt.expectedLength {
+				t.Fatalf("snake length mismatch: expected %d, got %d", tt.expectedLength, len(snap.Snake))
+			}
+			if snap.Snake[0] != expectedHead {
+				t.Fatalf("head position mismatch: expected %+v, got %+v", expectedHead, snap.Snake[0])
+			}
+			if snap.Score != tt.expectedScore {
+				t.Fatalf("score mismatch: expected %d, got %d", tt.expectedScore, snap.Score)
+			}
+
+			if tt.verify != nil {
+				tt.verify(t, snap)
+			}
+		})
+	}
+}
+
+func TestAdvanceTickEndsGameWhenNoSpaceForFood(t *testing.T) {
+	engine, err := NewEngine(2, 2, 21)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.snake = []Point{{0, 1}, {0, 0}, {1, 0}}
+	engine.occupied = map[Point]struct{}{
+		{X: 0, Y: 1}: {},
+		{X: 0, Y: 0}: {},
+		{X: 1, Y: 0}: {},
+	}
+	engine.direction = DirectionRight
+	engine.food = Point{X: 1, Y: 1}
+
+	engine.AdvanceTick()
+
+	snap := engine.Snapshot()
+
+	if !snap.GameOver {
+		t.Fatalf("expected game to end when no space remains for food")
+	}
+	if snap.Score != 0 {
+		t.Fatalf("score should not increment when food cannot respawn, got %d", snap.Score)
+	}
+	if snap.Tick != 1 {
+		t.Fatalf("tick should advance before detecting no free cells, got %d", snap.Tick)
+	}
+	if len(snap.Snake) != 4 {
+		t.Fatalf("expected snake to fill the board, got length %d", len(snap.Snake))
+	}
+	if snap.Snake[0] != (Point{X: 1, Y: 1}) {
+		t.Fatalf("expected head to move onto final food cell, got %+v", snap.Snake[0])
 	}
 }
