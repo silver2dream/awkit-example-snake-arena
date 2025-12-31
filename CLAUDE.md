@@ -112,7 +112,6 @@ touch .ai/state/STOP
 | What | Where |
 |------|-------|
 | Config | `.ai/config/workflow.yaml` |
-| Scripts | `.ai/scripts/` |
 | Skills | `.ai/skills/` |
 | Rules | `.ai/rules/` |
 | Specs | `.ai/specs/` |
