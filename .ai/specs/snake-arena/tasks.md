@@ -10,7 +10,7 @@
 
 ## Frontend
 
-- [ ] Build lobby UI (create/join) <!-- Issue #28 -->
+- [ ] Build lobby UI (create/join)
 - [ ] Add WebSocket client + reconnect basics
 - [ ] Implement canvas renderer for server snapshots
 - [ ] Implement keyboard input (direction) + basic throttling
