@@ -424,3 +424,151 @@ func TestAdvanceTickEndsGameWhenNoSpaceForFood(t *testing.T) {
 		t.Fatalf("expected head to move onto final food cell, got %+v", snap.Snake[0])
 	}
 }
+
+func TestAdvanceTickStopsAfterGameOver(t *testing.T) {
+	engine, err := NewEngine(2, 2, 31)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	start := engine.Snapshot()
+
+	if ok := engine.QueueDirection(DirectionRight); !ok {
+		t.Fatalf("expected direction to queue before collision")
+	}
+	engine.AdvanceTick()
+
+	afterCollision := engine.Snapshot()
+	if !afterCollision.GameOver {
+		t.Fatalf("expected wall collision to end the game")
+	}
+	if afterCollision.Tick != start.Tick {
+		t.Fatalf("tick should not advance after immediate collision, expected %d got %d", start.Tick, afterCollision.Tick)
+	}
+	if !reflect.DeepEqual(afterCollision.Snake, start.Snake) {
+		t.Fatalf("snake position should not change on collision, expected %+v got %+v", start.Snake, afterCollision.Snake)
+	}
+	if engine.QueueDirection(DirectionDown) {
+		t.Fatalf("should not accept inputs after game is over")
+	}
+
+	engine.AdvanceTick()
+	final := engine.Snapshot()
+
+	if !reflect.DeepEqual(final, afterCollision) {
+		t.Fatalf("state should remain frozen after game over, got %+v", final)
+	}
+}
+
+func TestAdvanceTickDetectsBoundaryCollisions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		width        int
+		height       int
+		steps        []Direction
+		food         Point
+		expectedHead Point
+		expectedTick int
+	}{
+		{
+			name:         "single column top boundary",
+			width:        1,
+			height:       3,
+			steps:        []Direction{DirectionUp, DirectionUp},
+			food:         Point{X: 0, Y: 2},
+			expectedHead: Point{X: 0, Y: 0},
+			expectedTick: 1,
+		},
+		{
+			name:         "single row left boundary",
+			width:        3,
+			height:       1,
+			steps:        []Direction{DirectionLeft, DirectionLeft},
+			food:         Point{X: 2, Y: 0},
+			expectedHead: Point{X: 0, Y: 0},
+			expectedTick: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			engine, err := NewEngine(tt.width, tt.height, 41)
+			if err != nil {
+				t.Fatalf("unexpected error creating engine: %v", err)
+			}
+
+			engine.food = tt.food
+
+			for _, direction := range tt.steps {
+				if ok := engine.QueueDirection(direction); !ok {
+					t.Fatalf("failed to queue direction %v", direction)
+				}
+				engine.AdvanceTick()
+			}
+
+			snap := engine.Snapshot()
+
+			if !snap.GameOver {
+				t.Fatalf("expected boundary collision to end game")
+			}
+			if snap.Tick != tt.expectedTick {
+				t.Fatalf("tick mismatch: expected %d, got %d", tt.expectedTick, snap.Tick)
+			}
+			if snap.Snake[0] != tt.expectedHead {
+				t.Fatalf("head position mismatch: expected %+v, got %+v", tt.expectedHead, snap.Snake[0])
+			}
+			if snap.Score != 0 {
+				t.Fatalf("score should remain zero when no food eaten, got %d", snap.Score)
+			}
+		})
+	}
+}
+
+func TestAdvanceTickSpawnsFoodWithOtherSnakesPresent(t *testing.T) {
+	engine, err := NewEngine(3, 3, 51)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.snake = []Point{{X: 0, Y: 0}}
+	engine.direction = DirectionDown
+	engine.occupied = map[Point]struct{}{
+		{X: 0, Y: 0}: {},
+		{X: 1, Y: 0}: {},
+		{X: 2, Y: 0}: {},
+		{X: 1, Y: 1}: {},
+		{X: 2, Y: 1}: {},
+		{X: 0, Y: 2}: {},
+		{X: 1, Y: 2}: {},
+	}
+	engine.food = Point{X: 0, Y: 1}
+
+	if queued := engine.QueueDirection(DirectionDown); !queued {
+		t.Fatalf("expected to queue direction before advancing")
+	}
+
+	engine.AdvanceTick()
+
+	snap := engine.Snapshot()
+
+	if snap.GameOver {
+		t.Fatalf("unexpected game over while resolving food respawn near other snakes")
+	}
+	if len(snap.Snake) != 2 {
+		t.Fatalf("expected snake to grow after eating food, got length %d", len(snap.Snake))
+	}
+	if snap.Score != 1 {
+		t.Fatalf("expected score to increase after eating food, got %d", snap.Score)
+	}
+
+	expectedFood := Point{X: 2, Y: 2}
+	if snap.Food != expectedFood {
+		t.Fatalf("expected food to respawn at %+v, got %+v", expectedFood, snap.Food)
+	}
+	if _, blocked := engine.occupied[expectedFood]; blocked {
+		t.Fatalf("food should spawn on free cell, but %+v is marked occupied", expectedFood)
+	}
+}
