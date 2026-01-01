@@ -2,6 +2,7 @@ package game
 
 import (
 	"errors"
+	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -85,6 +86,60 @@ func TestFoodConsumptionGrowsSnakeAndSpawnsNewFood(t *testing.T) {
 		if reflect.DeepEqual(segment, snap.Food) {
 			t.Fatalf("food spawned on top of snake at %+v", snap.Food)
 		}
+	}
+}
+
+func TestAdvanceTickSpawnsFoodDeterministically(t *testing.T) {
+	engine, err := NewEngine(4, 3, 3)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	seed := int64(77)
+	engine.rng = rand.New(rand.NewSource(seed))
+	engine.snake = []Point{{X: 1, Y: 1}}
+	engine.occupied = map[Point]struct{}{
+		{X: 1, Y: 1}: {},
+	}
+	engine.direction = DirectionRight
+	engine.food = Point{X: 2, Y: 1}
+
+	occupiedAfterMove := map[Point]struct{}{
+		{X: 1, Y: 1}: {},
+		{X: 2, Y: 1}: {},
+	}
+	expectedRng := rand.New(rand.NewSource(seed))
+	freeCells := make([]Point, 0, engine.width*engine.height-len(occupiedAfterMove))
+	for y := 0; y < engine.height; y++ {
+		for x := 0; x < engine.width; x++ {
+			point := Point{X: x, Y: y}
+			if _, taken := occupiedAfterMove[point]; !taken {
+				freeCells = append(freeCells, point)
+			}
+		}
+	}
+	expectedFood := freeCells[expectedRng.Intn(len(freeCells))]
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	if snap.GameOver {
+		t.Fatalf("did not expect game over while respawning deterministic food")
+	}
+	if snap.Tick != 1 {
+		t.Fatalf("expected tick to advance, got %d", snap.Tick)
+	}
+	if snap.Score != 1 {
+		t.Fatalf("expected score to increment after eating, got %d", snap.Score)
+	}
+	if len(snap.Snake) != 2 {
+		t.Fatalf("expected snake to grow after eating, got length %d", len(snap.Snake))
+	}
+	if snap.Snake[0] != (Point{X: 2, Y: 1}) {
+		t.Fatalf("expected head to move right onto food, got %+v", snap.Snake[0])
+	}
+	if snap.Food != expectedFood {
+		t.Fatalf("expected deterministic food respawn at %+v, got %+v", expectedFood, snap.Food)
 	}
 }
 
@@ -174,6 +229,7 @@ func TestNewEngineValidation(t *testing.T) {
 		{name: "zero width", width: 0, height: 5, err: ErrInvalidDimensions},
 		{name: "zero height", width: 5, height: 0, err: ErrInvalidDimensions},
 		{name: "no free cells", width: 1, height: 1, err: ErrNoFreeCells},
+		{name: "negative dimensions", width: -2, height: 3, err: ErrInvalidDimensions},
 	}
 
 	for _, tt := range tests {
@@ -490,6 +546,24 @@ func TestAdvanceTickDetectsBoundaryCollisions(t *testing.T) {
 			expectedHead: Point{X: 0, Y: 0},
 			expectedTick: 1,
 		},
+		{
+			name:         "single column bottom boundary",
+			width:        1,
+			height:       3,
+			steps:        []Direction{DirectionDown, DirectionDown},
+			food:         Point{X: 0, Y: 0},
+			expectedHead: Point{X: 0, Y: 2},
+			expectedTick: 1,
+		},
+		{
+			name:         "single row right boundary",
+			width:        3,
+			height:       1,
+			steps:        []Direction{DirectionRight, DirectionRight},
+			food:         Point{X: 0, Y: 0},
+			expectedHead: Point{X: 2, Y: 0},
+			expectedTick: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -524,6 +598,49 @@ func TestAdvanceTickDetectsBoundaryCollisions(t *testing.T) {
 				t.Fatalf("score should remain zero when no food eaten, got %d", snap.Score)
 			}
 		})
+	}
+}
+
+func TestAdvanceTickPreservesExternalOccupancy(t *testing.T) {
+	engine, err := NewEngine(5, 5, 61)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	external := []Point{{X: 0, Y: 0}, {X: 4, Y: 4}}
+
+	engine.snake = []Point{{X: 2, Y: 2}, {X: 2, Y: 3}}
+	engine.occupied = map[Point]struct{}{
+		{X: 2, Y: 2}: {},
+		{X: 2, Y: 3}: {},
+	}
+	for _, point := range external {
+		engine.occupied[point] = struct{}{}
+	}
+	engine.direction = DirectionRight
+	engine.food = Point{X: 1, Y: 1}
+
+	engine.AdvanceTick()
+
+	snap := engine.Snapshot()
+
+	for _, point := range external {
+		if _, ok := engine.occupied[point]; !ok {
+			t.Fatalf("expected external occupancy at %+v to persist after movement", point)
+		}
+	}
+	if snap.GameOver {
+		t.Fatalf("expected game to continue when not colliding with other snakes")
+	}
+	if snap.Tick != 1 {
+		t.Fatalf("expected tick to advance, got %d", snap.Tick)
+	}
+	expectedSnake := []Point{{X: 3, Y: 2}, {X: 2, Y: 2}}
+	if !reflect.DeepEqual(snap.Snake, expectedSnake) {
+		t.Fatalf("expected snake to move right without growth, got %+v", snap.Snake)
+	}
+	if snap.Score != 0 {
+		t.Fatalf("expected score to remain unchanged, got %d", snap.Score)
 	}
 }
 
