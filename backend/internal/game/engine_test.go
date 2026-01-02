@@ -94,6 +94,67 @@ func TestAdvanceTickMovesSnake(t *testing.T) {
 	}
 }
 
+func TestAdvanceTickAppliesLatestQueuedDirection(t *testing.T) {
+	engine, err := NewEngine(6, 6, 17)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.food = Point{X: 0, Y: 0}
+	start := engine.Snapshot()
+
+	if queued := engine.QueueDirection(DirectionUp); !queued {
+		t.Fatalf("expected to queue first direction")
+	}
+	if queued := engine.QueueDirection(DirectionLeft); !queued {
+		t.Fatalf("expected to queue overriding direction")
+	}
+
+	engine.AdvanceTick()
+	afterFirst := engine.Snapshot()
+
+	expectedFirstHead := Point{X: start.Snake[0].X - 1, Y: start.Snake[0].Y}
+	if afterFirst.Snake[0] != expectedFirstHead {
+		t.Fatalf("expected head %+v after applying latest queued direction, got %+v", expectedFirstHead, afterFirst.Snake[0])
+	}
+	if afterFirst.Direction != DirectionLeft {
+		t.Fatalf("direction mismatch: expected %v, got %v", DirectionLeft, afterFirst.Direction)
+	}
+	if afterFirst.Tick != start.Tick+1 {
+		t.Fatalf("tick should advance by one, expected %d got %d", start.Tick+1, afterFirst.Tick)
+	}
+	if engine.hasInput {
+		t.Fatalf("expected input flag to clear after advancing tick")
+	}
+
+	if queued := engine.QueueDirection(DirectionUp); !queued {
+		t.Fatalf("expected to queue a new direction after movement")
+	}
+
+	engine.AdvanceTick()
+	afterSecond := engine.Snapshot()
+	expectedSecondHead := Point{X: expectedFirstHead.X, Y: expectedFirstHead.Y - 1}
+
+	if afterSecond.Snake[0] != expectedSecondHead {
+		t.Fatalf("expected head %+v after second movement, got %+v", expectedSecondHead, afterSecond.Snake[0])
+	}
+	if afterSecond.Direction != DirectionUp {
+		t.Fatalf("direction mismatch after second tick: expected %v, got %v", DirectionUp, afterSecond.Direction)
+	}
+	if afterSecond.Tick != afterFirst.Tick+1 {
+		t.Fatalf("tick should advance again, expected %d got %d", afterFirst.Tick+1, afterSecond.Tick)
+	}
+	if afterSecond.Score != 0 {
+		t.Fatalf("score should remain unchanged without food, got %d", afterSecond.Score)
+	}
+	if len(afterSecond.Snake) != 1 {
+		t.Fatalf("snake length should not change without eating, got %d", len(afterSecond.Snake))
+	}
+	if engine.hasInput {
+		t.Fatalf("expected queued input to reset after processing second tick")
+	}
+}
+
 func TestFoodConsumptionGrowsSnakeAndSpawnsNewFood(t *testing.T) {
 	engine, err := NewEngine(6, 6, 3)
 	if err != nil {
@@ -274,6 +335,36 @@ func TestDeterministicTicksWithSameSeed(t *testing.T) {
 
 	if !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
 		t.Fatalf("expected deterministic state with identical inputs")
+	}
+}
+
+func TestSnapshotReturnsIndependentCopy(t *testing.T) {
+	engine, err := NewEngine(4, 4, 91)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	snap := engine.Snapshot()
+	modified := snap
+	modified.Snake[0] = Point{X: -1, Y: -1}
+	modified.Snake = append(modified.Snake, Point{X: -2, Y: -2})
+	modified.Food = Point{X: -3, Y: -3}
+	modified.Score = 99
+	modified.Direction = DirectionLeft
+
+	latest := engine.Snapshot()
+
+	if latest.Snake[0] == modified.Snake[0] || len(latest.Snake) != len(snap.Snake) {
+		t.Fatalf("expected snapshot mutations to leave engine snake unchanged, got %+v", latest.Snake)
+	}
+	if latest.Food == modified.Food {
+		t.Fatalf("engine food should remain unchanged after snapshot mutation")
+	}
+	if latest.Score == modified.Score {
+		t.Fatalf("engine score should remain unchanged after snapshot mutation")
+	}
+	if latest.Direction == modified.Direction && latest.Direction == DirectionLeft {
+		t.Fatalf("engine direction should remain unchanged after snapshot mutation")
 	}
 }
 
@@ -542,6 +633,53 @@ func TestAdvanceTickEndsGameWhenNoSpaceForFood(t *testing.T) {
 	}
 	if snap.Snake[0] != (Point{X: 1, Y: 1}) {
 		t.Fatalf("expected head to move onto final food cell, got %+v", snap.Snake[0])
+	}
+}
+
+func TestAdvanceTickEndsGameWhenNoSpaceForFoodWithOtherSnakes(t *testing.T) {
+	engine, err := NewEngine(2, 2, 23)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.snake = []Point{{X: 0, Y: 0}}
+	engine.occupied = map[Point]struct{}{
+		{X: 0, Y: 0}: {},
+		{X: 1, Y: 0}: {},
+		{X: 1, Y: 1}: {},
+	}
+	engine.direction = DirectionDown
+	engine.food = Point{X: 0, Y: 1}
+
+	if queued := engine.QueueDirection(DirectionDown); !queued {
+		t.Fatalf("expected to queue downward movement")
+	}
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	if !snap.GameOver {
+		t.Fatalf("expected game to end when no free cells remain for respawn")
+	}
+	if snap.Tick != 1 {
+		t.Fatalf("tick should advance once before detecting the lack of space, got %d", snap.Tick)
+	}
+	if snap.Score != 0 {
+		t.Fatalf("score should remain unchanged when food cannot respawn, got %d", snap.Score)
+	}
+
+	expectedSnake := []Point{{X: 0, Y: 1}, {X: 0, Y: 0}}
+	if !reflect.DeepEqual(snap.Snake, expectedSnake) {
+		t.Fatalf("expected snake to grow into final free cell, got %+v", snap.Snake)
+	}
+
+	for _, point := range []Point{{X: 1, Y: 0}, {X: 1, Y: 1}} {
+		if _, ok := engine.occupied[point]; !ok {
+			t.Fatalf("expected external occupancy at %+v to persist", point)
+		}
+	}
+	if engine.QueueDirection(DirectionLeft) {
+		t.Fatalf("should not accept further input after game over")
 	}
 }
 
