@@ -155,6 +155,94 @@ func TestAdvanceTickAppliesLatestQueuedDirection(t *testing.T) {
 	}
 }
 
+func TestMoveSnakeUpdatesOccupancy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		snake            []Point
+		occupied         map[Point]struct{}
+		next             Point
+		grew             bool
+		expectedSnake    []Point
+		expectedOccupied map[Point]struct{}
+	}{
+		{
+			name:  "moves without growth and removes tail",
+			snake: []Point{{X: 1, Y: 1}, {X: 1, Y: 2}, {X: 1, Y: 3}},
+			occupied: map[Point]struct{}{
+				{X: 1, Y: 1}: {},
+				{X: 1, Y: 2}: {},
+				{X: 1, Y: 3}: {},
+				{X: 0, Y: 0}: {},
+			},
+			next: Point{X: 2, Y: 1},
+			grew: false,
+			expectedSnake: []Point{
+				{X: 2, Y: 1},
+				{X: 1, Y: 1},
+				{X: 1, Y: 2},
+			},
+			expectedOccupied: map[Point]struct{}{
+				{X: 2, Y: 1}: {},
+				{X: 1, Y: 1}: {},
+				{X: 1, Y: 2}: {},
+				{X: 0, Y: 0}: {},
+			},
+		},
+		{
+			name:  "growing preserves tail and occupancy",
+			snake: []Point{{X: 2, Y: 2}, {X: 2, Y: 3}},
+			occupied: map[Point]struct{}{
+				{X: 2, Y: 2}: {},
+				{X: 2, Y: 3}: {},
+			},
+			next: Point{X: 3, Y: 2},
+			grew: true,
+			expectedSnake: []Point{
+				{X: 3, Y: 2},
+				{X: 2, Y: 2},
+				{X: 2, Y: 3},
+			},
+			expectedOccupied: map[Point]struct{}{
+				{X: 3, Y: 2}: {},
+				{X: 2, Y: 2}: {},
+				{X: 2, Y: 3}: {},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine := &Engine{
+				snake:    append([]Point(nil), tt.snake...),
+				occupied: map[Point]struct{}{},
+			}
+			for point := range tt.occupied {
+				engine.occupied[point] = struct{}{}
+			}
+
+			engine.moveSnake(tt.next, tt.grew)
+
+			if !reflect.DeepEqual(engine.snake, tt.expectedSnake) {
+				t.Fatalf("expected snake %+v, got %+v", tt.expectedSnake, engine.snake)
+			}
+
+			if len(engine.occupied) != len(tt.expectedOccupied) {
+				t.Fatalf("expected %d occupied cells, got %d", len(tt.expectedOccupied), len(engine.occupied))
+			}
+			for point := range tt.expectedOccupied {
+				if _, ok := engine.occupied[point]; !ok {
+					t.Fatalf("expected occupancy at %+v to remain set", point)
+				}
+			}
+		})
+	}
+}
+
 func TestFoodConsumptionGrowsSnakeAndSpawnsNewFood(t *testing.T) {
 	engine, err := NewEngine(6, 6, 3)
 	if err != nil {
@@ -237,6 +325,45 @@ func TestAdvanceTickSpawnsFoodDeterministically(t *testing.T) {
 	}
 	if snap.Food != expectedFood {
 		t.Fatalf("expected deterministic food respawn at %+v, got %+v", expectedFood, snap.Food)
+	}
+}
+
+func TestRandomEmptyCellRespectsExternalOccupancy(t *testing.T) {
+	engine, err := NewEngine(3, 3, 5)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.snake = []Point{{X: 1, Y: 1}}
+	engine.occupied = map[Point]struct{}{
+		{X: 1, Y: 1}: {},
+		{X: 0, Y: 0}: {},
+		{X: 2, Y: 2}: {},
+	}
+
+	seed := int64(7)
+	engine.rng = rand.New(rand.NewSource(seed))
+
+	free := make([]Point, 0, engine.width*engine.height-len(engine.occupied))
+	for y := 0; y < engine.height; y++ {
+		for x := 0; x < engine.width; x++ {
+			point := Point{X: x, Y: y}
+			if _, taken := engine.occupied[point]; !taken {
+				free = append(free, point)
+			}
+		}
+	}
+	expected := free[rand.New(rand.NewSource(seed)).Intn(len(free))]
+
+	point, err := engine.randomEmptyCell()
+	if err != nil {
+		t.Fatalf("unexpected error finding empty cell: %v", err)
+	}
+	if point != expected {
+		t.Fatalf("expected deterministic free cell %+v, got %+v", expected, point)
+	}
+	if _, taken := engine.occupied[point]; taken {
+		t.Fatalf("returned cell %+v should not be occupied", point)
 	}
 }
 
@@ -445,6 +572,43 @@ func TestQueueDirectionValidation(t *testing.T) {
 				t.Fatalf("did not expect direction to queue when input should be rejected")
 			}
 		})
+	}
+}
+
+func TestAdvanceTickRejectsInvalidInputButContinuesMovement(t *testing.T) {
+	engine, err := NewEngine(4, 4, 73)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	start := engine.Snapshot()
+	engine.food = Point{X: 0, Y: 0}
+
+	if queued := engine.QueueDirection(Direction(-99)); queued {
+		t.Fatalf("expected invalid direction to be rejected")
+	}
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	expectedHead := Point{X: start.Snake[0].X + 1, Y: start.Snake[0].Y}
+	if snap.Snake[0] != expectedHead {
+		t.Fatalf("expected head to advance right to %+v, got %+v", expectedHead, snap.Snake[0])
+	}
+	if snap.Direction != DirectionRight {
+		t.Fatalf("direction should remain unchanged after rejecting input, got %v", snap.Direction)
+	}
+	if snap.Tick != start.Tick+1 {
+		t.Fatalf("expected tick to increment from %d to %d, got %d", start.Tick, start.Tick+1, snap.Tick)
+	}
+	if snap.GameOver {
+		t.Fatalf("game should continue after ignoring invalid input")
+	}
+	if snap.Score != start.Score {
+		t.Fatalf("score should remain unchanged without eating, got %d", snap.Score)
+	}
+	if engine.hasInput {
+		t.Fatalf("engine should not retain rejected input")
 	}
 }
 
@@ -896,5 +1060,34 @@ func TestAdvanceTickSpawnsFoodWithOtherSnakesPresent(t *testing.T) {
 	}
 	if _, blocked := engine.occupied[expectedFood]; blocked {
 		t.Fatalf("food should spawn on free cell, but %+v is marked occupied", expectedFood)
+	}
+}
+
+func TestIsOpposite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		current   Direction
+		candidate Direction
+		opposite  bool
+	}{
+		{name: "up vs down", current: DirectionUp, candidate: DirectionDown, opposite: true},
+		{name: "down vs up", current: DirectionDown, candidate: DirectionUp, opposite: true},
+		{name: "left vs right", current: DirectionLeft, candidate: DirectionRight, opposite: true},
+		{name: "right vs left", current: DirectionRight, candidate: DirectionLeft, opposite: true},
+		{name: "same direction", current: DirectionUp, candidate: DirectionUp, opposite: false},
+		{name: "non opposite turn", current: DirectionUp, candidate: DirectionRight, opposite: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isOpposite(tt.current, tt.candidate); got != tt.opposite {
+				t.Fatalf("isOpposite(%v, %v) = %v, want %v", tt.current, tt.candidate, got, tt.opposite)
+			}
+		})
 	}
 }
