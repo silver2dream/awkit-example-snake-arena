@@ -465,6 +465,118 @@ func TestDeterministicTicksWithSameSeed(t *testing.T) {
 	}
 }
 
+func TestDeterministicTicksWithExternalOccupancy(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 5
+		height = 5
+		seed   = int64(2024)
+	)
+
+	expectedOccupiedAfterGrowth := map[Point]struct{}{
+		{X: 3, Y: 2}: {},
+		{X: 2, Y: 2}: {},
+		{X: 2, Y: 3}: {},
+		{X: 0, Y: 0}: {},
+		{X: 4, Y: 4}: {},
+		{X: 1, Y: 1}: {},
+		{X: 3, Y: 3}: {},
+	}
+	expectedFood := func() Point {
+		rng := rand.New(rand.NewSource(seed))
+		free := make([]Point, 0, width*height-len(expectedOccupiedAfterGrowth))
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				point := Point{X: x, Y: y}
+				if _, taken := expectedOccupiedAfterGrowth[point]; !taken {
+					free = append(free, point)
+				}
+			}
+		}
+		return free[rng.Intn(len(free))]
+	}()
+
+	newEngineWithExternalOccupancy := func(t *testing.T) *Engine {
+		engine, err := NewEngine(width, height, seed)
+		if err != nil {
+			t.Fatalf("unexpected error creating engine: %v", err)
+		}
+
+		engine.snake = []Point{{X: 2, Y: 2}, {X: 2, Y: 3}}
+		engine.occupied = map[Point]struct{}{
+			{X: 2, Y: 2}: {},
+			{X: 2, Y: 3}: {},
+			{X: 0, Y: 0}: {},
+			{X: 4, Y: 4}: {},
+			{X: 1, Y: 1}: {},
+			{X: 3, Y: 3}: {},
+		}
+		engine.direction = DirectionRight
+		engine.food = Point{X: 3, Y: 2}
+		engine.rng = rand.New(rand.NewSource(seed))
+
+		return engine
+	}
+
+	first := newEngineWithExternalOccupancy(t)
+	second := newEngineWithExternalOccupancy(t)
+
+	steps := []Direction{DirectionRight, DirectionDown, DirectionLeft}
+	for _, direction := range steps {
+		if ok := first.QueueDirection(direction); !ok && !first.gameOver {
+			t.Fatalf("expected to queue direction %v before collision", direction)
+		}
+		if ok := second.QueueDirection(direction); !ok && !second.gameOver {
+			t.Fatalf("expected to queue direction %v before collision", direction)
+		}
+
+		first.AdvanceTick()
+		second.AdvanceTick()
+	}
+
+	snapA := first.Snapshot()
+	snapB := second.Snapshot()
+
+	if !reflect.DeepEqual(snapA, snapB) {
+		t.Fatalf("expected deterministic snapshots with external occupancy:\nfirst: %+v\nsecond: %+v", snapA, snapB)
+	}
+
+	expectedSnake := []Point{
+		{X: 3, Y: 2},
+		{X: 2, Y: 2},
+		{X: 2, Y: 3},
+	}
+
+	if !snapA.GameOver {
+		t.Fatalf("expected collision with other snake to end the game")
+	}
+	if snapA.Tick != 1 {
+		t.Fatalf("tick should advance only before the collision, expected 1 got %d", snapA.Tick)
+	}
+	if snapA.Score != 1 {
+		t.Fatalf("expected score to increment once after eating before collision, got %d", snapA.Score)
+	}
+	if len(snapA.Snake) != len(expectedSnake) {
+		t.Fatalf("snake length mismatch: expected %d, got %d", len(expectedSnake), len(snapA.Snake))
+	}
+	if !reflect.DeepEqual(snapA.Snake, expectedSnake) {
+		t.Fatalf("snake body mismatch: expected %+v, got %+v", expectedSnake, snapA.Snake)
+	}
+	if snapA.Food != expectedFood {
+		t.Fatalf("expected deterministic food respawn at %+v, got %+v", expectedFood, snapA.Food)
+	}
+	if snapA.Direction != DirectionDown {
+		t.Fatalf("direction should reflect the last processed input before collision, expected %v got %v", DirectionDown, snapA.Direction)
+	}
+
+	for _, point := range []Point{{X: 0, Y: 0}, {X: 4, Y: 4}, {X: 1, Y: 1}, {X: 3, Y: 3}} {
+		if _, ok := first.occupied[point]; !ok {
+			t.Fatalf("expected external occupancy at %+v to persist after collision", point)
+		}
+	}
+}
+
 func TestSnapshotReturnsIndependentCopy(t *testing.T) {
 	engine, err := NewEngine(4, 4, 91)
 	if err != nil {
