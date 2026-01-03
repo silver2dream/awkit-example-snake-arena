@@ -612,6 +612,189 @@ func TestAdvanceTickRejectsInvalidInputButContinuesMovement(t *testing.T) {
 	}
 }
 
+func TestCollisionDetectionScenarios(t *testing.T) {
+	t.Parallel()
+
+	type expectation struct {
+		head     Point
+		length   int
+		score    int
+		tick     int
+		gameOver bool
+	}
+
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T) *Engine
+		expect expectation
+		verify func(t *testing.T, engine *Engine, snap Snapshot)
+	}{
+		{
+			name: "snake hits wall",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(2, 2, 1)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+				engine.snake = []Point{{X: 0, Y: 0}}
+				engine.occupied = map[Point]struct{}{
+					{X: 0, Y: 0}: {},
+				}
+				engine.direction = DirectionLeft
+				engine.food = Point{X: 1, Y: 1}
+				return engine
+			},
+			expect: expectation{
+				head:     Point{X: 0, Y: 0},
+				length:   1,
+				score:    0,
+				tick:     0,
+				gameOver: true,
+			},
+		},
+		{
+			name: "snake hits itself",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(4, 4, 2)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				engine.snake = []Point{{X: 1, Y: 1}, {X: 0, Y: 1}, {X: 0, Y: 0}}
+				engine.occupied = map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 0, Y: 1}: {},
+					{X: 0, Y: 0}: {},
+				}
+				engine.direction = DirectionLeft
+				engine.food = Point{X: 3, Y: 3}
+
+				return engine
+			},
+			expect: expectation{
+				head:     Point{X: 1, Y: 1},
+				length:   3,
+				score:    0,
+				tick:     0,
+				gameOver: true,
+			},
+		},
+		{
+			name: "snake eats food and grows",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(4, 3, 9)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				engine.snake = []Point{{X: 1, Y: 1}}
+				engine.occupied = map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+				}
+				engine.direction = DirectionRight
+				engine.food = Point{X: 2, Y: 1}
+				engine.rng = rand.New(rand.NewSource(33))
+
+				return engine
+			},
+			expect: expectation{
+				head:     Point{X: 2, Y: 1},
+				length:   2,
+				score:    1,
+				tick:     1,
+				gameOver: false,
+			},
+			verify: func(t *testing.T, engine *Engine, snap Snapshot) {
+				occupiedAfterMove := map[Point]struct{}{
+					{X: 2, Y: 1}: {},
+					{X: 1, Y: 1}: {},
+				}
+
+				expectedRng := rand.New(rand.NewSource(33))
+				free := make([]Point, 0, engine.width*engine.height-len(occupiedAfterMove))
+				for y := 0; y < engine.height; y++ {
+					for x := 0; x < engine.width; x++ {
+						point := Point{X: x, Y: y}
+						if _, taken := occupiedAfterMove[point]; !taken {
+							free = append(free, point)
+						}
+					}
+				}
+
+				expectedFood := free[expectedRng.Intn(len(free))]
+				if snap.Food != expectedFood {
+					t.Fatalf("expected deterministic food respawn at %+v, got %+v", expectedFood, snap.Food)
+				}
+				if _, blocked := engine.occupied[snap.Food]; blocked {
+					t.Fatalf("food should not respawn on occupied cell %+v", snap.Food)
+				}
+			},
+		},
+		{
+			name: "snake hits other snake",
+			setup: func(t *testing.T) *Engine {
+				engine, err := NewEngine(4, 4, 5)
+				if err != nil {
+					t.Fatalf("unexpected error creating engine: %v", err)
+				}
+
+				engine.snake = []Point{{X: 1, Y: 1}}
+				engine.occupied = map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 2, Y: 1}: {}, // other player segment
+				}
+				engine.direction = DirectionRight
+				engine.food = Point{X: 0, Y: 0}
+
+				return engine
+			},
+			expect: expectation{
+				head:     Point{X: 1, Y: 1},
+				length:   1,
+				score:    0,
+				tick:     0,
+				gameOver: true,
+			},
+			verify: func(t *testing.T, engine *Engine, _ Snapshot) {
+				if _, ok := engine.occupied[Point{X: 2, Y: 1}]; !ok {
+					t.Fatalf("expected other snake occupancy to remain intact")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine := tt.setup(t)
+			engine.AdvanceTick()
+			snap := engine.Snapshot()
+
+			if snap.GameOver != tt.expect.gameOver {
+				t.Fatalf("game over mismatch: expected %v, got %v", tt.expect.gameOver, snap.GameOver)
+			}
+			if snap.Tick != tt.expect.tick {
+				t.Fatalf("tick mismatch: expected %d, got %d", tt.expect.tick, snap.Tick)
+			}
+			if len(snap.Snake) != tt.expect.length {
+				t.Fatalf("length mismatch: expected %d, got %d", tt.expect.length, len(snap.Snake))
+			}
+			if snap.Snake[0] != tt.expect.head {
+				t.Fatalf("head mismatch: expected %+v, got %+v", tt.expect.head, snap.Snake[0])
+			}
+			if snap.Score != tt.expect.score {
+				t.Fatalf("score mismatch: expected %d, got %d", tt.expect.score, snap.Score)
+			}
+
+			if tt.verify != nil {
+				tt.verify(t, engine, snap)
+			}
+		})
+	}
+}
+
 func TestAdvanceTickCollisionScenarios(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -1282,6 +1465,58 @@ func TestAdvanceTickSpawnsFoodWithOtherSnakesPresent(t *testing.T) {
 	}
 	if _, blocked := engine.occupied[expectedFood]; blocked {
 		t.Fatalf("food should spawn on free cell, but %+v is marked occupied", expectedFood)
+	}
+}
+
+func TestAdvanceTickCrowdedGridRespawn(t *testing.T) {
+	engine, err := NewEngine(3, 2, 99)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	engine.snake = []Point{{X: 0, Y: 0}}
+	engine.occupied = map[Point]struct{}{
+		{X: 0, Y: 0}: {},
+		{X: 0, Y: 1}: {},
+		{X: 1, Y: 1}: {},
+		{X: 2, Y: 1}: {},
+	}
+	engine.direction = DirectionRight
+	engine.food = Point{X: 1, Y: 0}
+	engine.rng = rand.New(rand.NewSource(99))
+
+	engine.AdvanceTick()
+
+	snap := engine.Snapshot()
+
+	expectedSnake := []Point{{X: 1, Y: 0}, {X: 0, Y: 0}}
+	if snap.GameOver {
+		t.Fatalf("did not expect game over while respawning in crowded grid")
+	}
+	if snap.Tick != 1 {
+		t.Fatalf("tick should advance after eating, got %d", snap.Tick)
+	}
+	if snap.Score != 1 {
+		t.Fatalf("score should increment after eating, got %d", snap.Score)
+	}
+	if len(snap.Snake) != len(expectedSnake) {
+		t.Fatalf("expected snake length %d, got %d", len(expectedSnake), len(snap.Snake))
+	}
+	if !reflect.DeepEqual(snap.Snake, expectedSnake) {
+		t.Fatalf("expected snake %+v, got %+v", expectedSnake, snap.Snake)
+	}
+
+	expectedFood := Point{X: 2, Y: 0}
+	if snap.Food != expectedFood {
+		t.Fatalf("expected respawn on last free cell %+v, got %+v", expectedFood, snap.Food)
+	}
+	if _, blocked := engine.occupied[snap.Food]; blocked {
+		t.Fatalf("food should not spawn on occupied cell %+v", snap.Food)
+	}
+	for _, point := range []Point{{X: 0, Y: 1}, {X: 1, Y: 1}, {X: 2, Y: 1}} {
+		if _, ok := engine.occupied[point]; !ok {
+			t.Fatalf("expected other player occupancy at %+v to persist", point)
+		}
 	}
 }
 
