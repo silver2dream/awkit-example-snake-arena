@@ -6,6 +6,234 @@ import (
 	"testing"
 )
 
+func TestAdvanceTickCollisionAndStateProgression(t *testing.T) {
+	t.Parallel()
+
+	type expectation struct {
+		snake     []Point
+		head      Point
+		score     int
+		tick      int
+		gameOver  bool
+		direction Direction
+		hasInput  bool
+		food      Point
+		occupied  map[Point]struct{}
+	}
+
+	growthOccupied := map[Point]struct{}{
+		{X: 2, Y: 1}: {},
+		{X: 1, Y: 1}: {},
+		{X: 0, Y: 0}: {},
+	}
+	expectedGrowthFood := deterministicEmptyCell(4, 3, growthOccupied, 33)
+
+	tests := []struct {
+		name      string
+		width     int
+		height    int
+		seed      int64
+		snake     []Point
+		external  []Point
+		direction Direction
+		food      Point
+		queued    *Direction
+		expect    expectation
+	}{
+		{
+			name:      "wall collision after queued turn",
+			width:     3,
+			height:    2,
+			seed:      5,
+			snake:     []Point{{X: 0, Y: 0}},
+			external:  []Point{{X: 2, Y: 1}},
+			direction: DirectionRight,
+			food:      Point{X: 1, Y: 1},
+			queued:    ptr(DirectionLeft),
+			expect: expectation{
+				snake:     []Point{{X: 0, Y: 0}},
+				head:      Point{X: 0, Y: 0},
+				score:     0,
+				tick:      0,
+				gameOver:  true,
+				direction: DirectionLeft,
+				hasInput:  false,
+				food:      Point{X: 1, Y: 1},
+				occupied: map[Point]struct{}{
+					{X: 0, Y: 0}: {},
+					{X: 2, Y: 1}: {},
+				},
+			},
+		},
+		{
+			name:      "self collision preserves board occupancy",
+			width:     4,
+			height:    4,
+			seed:      7,
+			snake:     []Point{{X: 1, Y: 1}, {X: 1, Y: 2}, {X: 1, Y: 3}},
+			external:  []Point{{X: 0, Y: 0}},
+			direction: DirectionDown,
+			food:      Point{X: 3, Y: 3},
+			expect: expectation{
+				snake:     []Point{{X: 1, Y: 1}, {X: 1, Y: 2}, {X: 1, Y: 3}},
+				head:      Point{X: 1, Y: 1},
+				score:     0,
+				tick:      0,
+				gameOver:  true,
+				direction: DirectionDown,
+				hasInput:  false,
+				food:      Point{X: 3, Y: 3},
+				occupied: map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 1, Y: 2}: {},
+					{X: 1, Y: 3}: {},
+					{X: 0, Y: 0}: {},
+				},
+			},
+		},
+		{
+			name:      "collision with other snake halts progression",
+			width:     4,
+			height:    3,
+			seed:      11,
+			snake:     []Point{{X: 1, Y: 1}},
+			external:  []Point{{X: 2, Y: 1}, {X: 0, Y: 2}},
+			direction: DirectionRight,
+			food:      Point{X: 0, Y: 0},
+			expect: expectation{
+				snake:     []Point{{X: 1, Y: 1}},
+				head:      Point{X: 1, Y: 1},
+				score:     0,
+				tick:      0,
+				gameOver:  true,
+				direction: DirectionRight,
+				hasInput:  false,
+				food:      Point{X: 0, Y: 0},
+				occupied: map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 2, Y: 1}: {},
+					{X: 0, Y: 2}: {},
+				},
+			},
+		},
+		{
+			name:      "eats food, grows, and respawns deterministically",
+			width:     4,
+			height:    3,
+			seed:      33,
+			snake:     []Point{{X: 1, Y: 1}},
+			external:  []Point{{X: 0, Y: 0}},
+			direction: DirectionRight,
+			food:      Point{X: 2, Y: 1},
+			expect: expectation{
+				snake:     []Point{{X: 2, Y: 1}, {X: 1, Y: 1}},
+				head:      Point{X: 2, Y: 1},
+				score:     1,
+				tick:      1,
+				gameOver:  false,
+				direction: DirectionRight,
+				hasInput:  false,
+				food:      expectedGrowthFood,
+				occupied: map[Point]struct{}{
+					{X: 2, Y: 1}: {},
+					{X: 1, Y: 1}: {},
+					{X: 0, Y: 0}: {},
+				},
+			},
+		},
+		{
+			name:      "moves forward without food and trims tail",
+			width:     5,
+			height:    4,
+			seed:      17,
+			snake:     []Point{{X: 2, Y: 1}, {X: 2, Y: 2}},
+			external:  []Point{{X: 0, Y: 0}},
+			direction: DirectionUp,
+			food:      Point{X: 4, Y: 3},
+			expect: expectation{
+				snake:     []Point{{X: 2, Y: 0}, {X: 2, Y: 1}},
+				head:      Point{X: 2, Y: 0},
+				score:     0,
+				tick:      1,
+				gameOver:  false,
+				direction: DirectionUp,
+				hasInput:  false,
+				food:      Point{X: 4, Y: 3},
+				occupied: map[Point]struct{}{
+					{X: 2, Y: 0}: {},
+					{X: 2, Y: 1}: {},
+					{X: 0, Y: 0}: {},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine := mustEngine(t, tt.width, tt.height, tt.seed)
+			engine.snake = append([]Point(nil), tt.snake...)
+			engine.occupied = map[Point]struct{}{}
+			for _, point := range tt.snake {
+				engine.occupied[point] = struct{}{}
+			}
+			for _, point := range tt.external {
+				engine.occupied[point] = struct{}{}
+			}
+			engine.direction = tt.direction
+			engine.food = tt.food
+			engine.rng = rand.New(rand.NewSource(tt.seed))
+
+			if tt.queued != nil {
+				engine.pending = *tt.queued
+				engine.hasInput = true
+			}
+
+			engine.AdvanceTick()
+			snap := engine.Snapshot()
+
+			if snap.GameOver != tt.expect.gameOver {
+				t.Fatalf("game over mismatch: expected %v, got %v", tt.expect.gameOver, snap.GameOver)
+			}
+			if snap.Tick != tt.expect.tick {
+				t.Fatalf("tick mismatch: expected %d, got %d", tt.expect.tick, snap.Tick)
+			}
+			if snap.Score != tt.expect.score {
+				t.Fatalf("score mismatch: expected %d, got %d", tt.expect.score, snap.Score)
+			}
+			if snap.Direction != tt.expect.direction {
+				t.Fatalf("direction mismatch: expected %v, got %v", tt.expect.direction, snap.Direction)
+			}
+			if len(snap.Snake) != len(tt.expect.snake) {
+				t.Fatalf("snake length mismatch: expected %d, got %d", len(tt.expect.snake), len(snap.Snake))
+			}
+			if snap.Snake[0] != tt.expect.head {
+				t.Fatalf("head mismatch: expected %+v, got %+v", tt.expect.head, snap.Snake[0])
+			}
+			if !reflect.DeepEqual(snap.Snake, tt.expect.snake) {
+				t.Fatalf("snake body mismatch: expected %+v, got %+v", tt.expect.snake, snap.Snake)
+			}
+			if snap.Food != tt.expect.food {
+				t.Fatalf("food mismatch: expected %+v, got %+v", tt.expect.food, snap.Food)
+			}
+			if engine.hasInput != tt.expect.hasInput {
+				t.Fatalf("hasInput mismatch: expected %v, got %v", tt.expect.hasInput, engine.hasInput)
+			}
+
+			if len(engine.occupied) != len(tt.expect.occupied) {
+				t.Fatalf("occupied count mismatch: expected %d, got %d", len(tt.expect.occupied), len(engine.occupied))
+			}
+			for point := range tt.expect.occupied {
+				if _, ok := engine.occupied[point]; !ok {
+					t.Fatalf("expected occupancy at %+v to remain set", point)
+				}
+			}
+		})
+	}
+}
+
 func TestCollisionDetectionCoverage(t *testing.T) {
 	t.Parallel()
 
