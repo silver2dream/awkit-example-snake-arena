@@ -1,6 +1,7 @@
 package game
 
 import (
+	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -137,5 +138,94 @@ func TestAdvanceTickCollisionsPreserveOccupancy(t *testing.T) {
 				t.Fatalf("expected direction to reflect queued input %v, got %v", tt.queued, after.Direction)
 			}
 		})
+	}
+}
+
+func TestDeterministicProgressionThroughGrowthAndCollision(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 4
+		height = 3
+		seed   = int64(121)
+	)
+
+	buildEngine := func(t *testing.T) *Engine {
+		t.Helper()
+
+		engine := mustEngine(t, width, height, seed)
+		engine.snake = []Point{{X: 1, Y: 1}, {X: 1, Y: 2}}
+		engine.occupied = map[Point]struct{}{
+			{X: 1, Y: 1}: {},
+			{X: 1, Y: 2}: {},
+			{X: 0, Y: 0}: {},
+		}
+		engine.direction = DirectionRight
+		engine.food = Point{X: 2, Y: 1}
+		engine.rng = rand.New(rand.NewSource(seed))
+
+		return engine
+	}
+
+	occupiedAfterGrowth := map[Point]struct{}{
+		{X: 2, Y: 1}: {},
+		{X: 1, Y: 1}: {},
+		{X: 1, Y: 2}: {},
+		{X: 0, Y: 0}: {},
+	}
+	expectedFood := deterministicEmptyCell(width, height, occupiedAfterGrowth, seed)
+
+	steps := []Direction{DirectionRight, DirectionUp, DirectionUp}
+
+	first := buildEngine(t)
+	second := buildEngine(t)
+
+	for _, dir := range steps {
+		for _, engine := range []*Engine{first, second} {
+			if ok := engine.QueueDirection(dir); !ok && !engine.gameOver {
+				t.Fatalf("expected to queue direction %v before collision", dir)
+			}
+			engine.AdvanceTick()
+		}
+	}
+
+	expectedSnake := []Point{
+		{X: 2, Y: 0},
+		{X: 2, Y: 1},
+		{X: 1, Y: 1},
+	}
+	expectedOccupied := map[Point]struct{}{
+		{X: 2, Y: 0}: {},
+		{X: 2, Y: 1}: {},
+		{X: 1, Y: 1}: {},
+		{X: 0, Y: 0}: {},
+	}
+	expectedSnapshot := Snapshot{
+		Width:     width,
+		Height:    height,
+		Snake:     expectedSnake,
+		Direction: DirectionUp,
+		Food:      expectedFood,
+		Tick:      2,
+		GameOver:  true,
+		Score:     1,
+	}
+
+	for _, engine := range []*Engine{first, second} {
+		snap := engine.Snapshot()
+
+		if !reflect.DeepEqual(snap, expectedSnapshot) {
+			t.Fatalf("expected snapshot %+v, got %+v", expectedSnapshot, snap)
+		}
+		if !reflect.DeepEqual(engine.occupied, expectedOccupied) {
+			t.Fatalf("expected occupancy %+v, got %+v", expectedOccupied, engine.occupied)
+		}
+		if engine.hasInput {
+			t.Fatalf("queued input should clear after processing collision")
+		}
+	}
+
+	if !reflect.DeepEqual(first.Snapshot(), second.Snapshot()) {
+		t.Fatalf("expected deterministic snapshots across identical runs")
 	}
 }
