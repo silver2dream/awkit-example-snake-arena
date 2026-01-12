@@ -248,3 +248,53 @@ func TestAdvanceTickDeterministicRespawnWithExternalOccupancy(t *testing.T) {
 		})
 	}
 }
+
+func TestAdvanceTickProcessesQueuedSameDirection(t *testing.T) {
+	t.Parallel()
+
+	engine := mustEngine(t, 5, 4, 4242)
+	engine.food = Point{X: 0, Y: 0}
+
+	start := engine.Snapshot()
+	startHead := start.Snake[0]
+
+	if ok := engine.QueueDirection(DirectionRight); !ok {
+		t.Fatalf("expected to queue same direction input")
+	}
+	if !engine.hasInput {
+		t.Fatalf("queued input flag should be set before advancing tick")
+	}
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	expectedHead := Point{X: startHead.X + 1, Y: startHead.Y}
+
+	if snap.GameOver {
+		t.Fatalf("game should continue when moving straight without collisions")
+	}
+	if snap.Tick != start.Tick+1 {
+		t.Fatalf("tick should advance by one, expected %d got %d", start.Tick+1, snap.Tick)
+	}
+	if snap.Score != start.Score {
+		t.Fatalf("score should remain unchanged without eating, expected %d got %d", start.Score, snap.Score)
+	}
+	if snap.Direction != DirectionRight {
+		t.Fatalf("direction should remain right after processing queued input, got %v", snap.Direction)
+	}
+	if engine.hasInput {
+		t.Fatalf("queued input flag should clear after applying direction")
+	}
+	if len(snap.Snake) != len(start.Snake) {
+		t.Fatalf("snake length should remain unchanged, expected %d got %d", len(start.Snake), len(snap.Snake))
+	}
+	if snap.Snake[0] != expectedHead {
+		t.Fatalf("head position mismatch: expected %+v, got %+v", expectedHead, snap.Snake[0])
+	}
+	if _, ok := engine.occupied[expectedHead]; !ok {
+		t.Fatalf("expected occupancy to include new head %+v", expectedHead)
+	}
+	if _, ok := engine.occupied[startHead]; ok {
+		t.Fatalf("expected previous head %+v to be cleared from occupancy", startHead)
+	}
+}

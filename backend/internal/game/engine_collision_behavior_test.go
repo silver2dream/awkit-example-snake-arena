@@ -188,6 +188,43 @@ func TestAdvanceTickClearsQueuedInputAfterCollision(t *testing.T) {
 	}
 }
 
+func TestAdvanceTickCollisionOnFoodCell(t *testing.T) {
+	t.Parallel()
+
+	engine := mustEngine(t, 3, 3, 606)
+	engine.snake = []Point{{X: 1, Y: 1}}
+	engine.occupied = map[Point]struct{}{
+		{X: 1, Y: 1}: {},
+		{X: 2, Y: 1}: {}, // other snake segment occupying the food cell
+	}
+	engine.direction = DirectionRight
+	engine.food = Point{X: 2, Y: 1}
+
+	before := engine.Snapshot()
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	if !snap.GameOver {
+		t.Fatalf("expected collision with other snake to end the game")
+	}
+	if snap.Tick != before.Tick {
+		t.Fatalf("tick should remain unchanged after immediate collision, expected %d got %d", before.Tick, snap.Tick)
+	}
+	if snap.Score != before.Score {
+		t.Fatalf("score should not change on collision, expected %d got %d", before.Score, snap.Score)
+	}
+	if !reflect.DeepEqual(snap.Snake, before.Snake) {
+		t.Fatalf("snake body should remain unchanged after collision on food cell, before %+v after %+v", before.Snake, snap.Snake)
+	}
+	if snap.Food != before.Food {
+		t.Fatalf("food should not respawn when collision happens before eating, expected %+v got %+v", before.Food, snap.Food)
+	}
+	if _, ok := engine.occupied[Point{X: 2, Y: 1}]; !ok {
+		t.Fatalf("expected external occupancy at %+v to persist after collision", Point{X: 2, Y: 1})
+	}
+}
+
 func TestRandomEmptyCellReturnsErrWhenFull(t *testing.T) {
 	t.Parallel()
 
