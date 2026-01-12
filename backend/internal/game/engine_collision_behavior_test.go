@@ -218,6 +218,108 @@ func TestRandomEmptyCellReturnsErrWhenFull(t *testing.T) {
 	}
 }
 
+func TestRandomEmptyCellWithExternalOccupancy(t *testing.T) {
+	t.Parallel()
+
+	clone := func(src map[Point]struct{}) map[Point]struct{} {
+		dst := make(map[Point]struct{}, len(src))
+		for point := range src {
+			dst[point] = struct{}{}
+		}
+		return dst
+	}
+
+	tests := []struct {
+		name      string
+		width     int
+		height    int
+		seed      int64
+		snake     []Point
+		occupied  map[Point]struct{}
+		expect    Point
+		expectErr error
+	}{
+		{
+			name:   "board full due to other players",
+			width:  3,
+			height: 3,
+			seed:   13,
+			snake:  []Point{{X: 1, Y: 1}},
+			occupied: map[Point]struct{}{
+				{X: 0, Y: 0}: {},
+				{X: 1, Y: 0}: {},
+				{X: 2, Y: 0}: {},
+				{X: 0, Y: 1}: {},
+				{X: 1, Y: 1}: {},
+				{X: 2, Y: 1}: {},
+				{X: 0, Y: 2}: {},
+				{X: 1, Y: 2}: {},
+				{X: 2, Y: 2}: {},
+			},
+			expectErr: ErrNoFreeCells,
+		},
+		{
+			name:   "single free cell beside other snakes",
+			width:  3,
+			height: 3,
+			seed:   7,
+			snake:  []Point{{X: 1, Y: 1}},
+			occupied: map[Point]struct{}{
+				{X: 0, Y: 0}: {},
+				{X: 1, Y: 0}: {},
+				{X: 2, Y: 0}: {},
+				{X: 0, Y: 1}: {},
+				{X: 1, Y: 1}: {},
+				{X: 2, Y: 1}: {},
+				{X: 0, Y: 2}: {},
+				{X: 1, Y: 2}: {},
+			},
+			expect: Point{X: 2, Y: 2},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine := &Engine{
+				width:    tt.width,
+				height:   tt.height,
+				snake:    append([]Point(nil), tt.snake...),
+				occupied: map[Point]struct{}{},
+				rng:      rand.New(rand.NewSource(tt.seed)),
+			}
+			for point := range tt.occupied {
+				engine.occupied[point] = struct{}{}
+			}
+
+			before := clone(engine.occupied)
+
+			cell, err := engine.randomEmptyCell()
+			if tt.expectErr != nil {
+				if !errors.Is(err, tt.expectErr) {
+					t.Fatalf("expected error %v, got %v", tt.expectErr, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error finding empty cell: %v", err)
+				}
+				if cell != tt.expect {
+					t.Fatalf("expected free cell %+v, got %+v", tt.expect, cell)
+				}
+				if _, taken := engine.occupied[cell]; taken {
+					t.Fatalf("returned cell %+v should not be occupied", cell)
+				}
+			}
+
+			if !reflect.DeepEqual(engine.occupied, before) {
+				t.Fatalf("expected occupancy map to remain unchanged, before %+v after %+v", before, engine.occupied)
+			}
+		})
+	}
+}
+
 func TestRandomEmptyCellSequenceDeterministicAcrossRespawns(t *testing.T) {
 	t.Parallel()
 
