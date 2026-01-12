@@ -433,6 +433,39 @@ func TestSelfCollisionEndsGame(t *testing.T) {
 	}
 }
 
+func TestNewEngineDeterministicInitializationSnapshotParity(t *testing.T) {
+	const (
+		width  = 6
+		height = 4
+		seed   = int64(4040)
+	)
+
+	first, err := NewEngine(width, height, seed)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+	second, err := NewEngine(width, height, seed)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	snapA := first.Snapshot()
+	snapB := second.Snapshot()
+
+	if !reflect.DeepEqual(snapA, snapB) {
+		t.Fatalf("expected identical snapshots for same seed, got %+v and %+v", snapA, snapB)
+	}
+	if snapA.Tick != 0 || snapA.Score != 0 {
+		t.Fatalf("expected zeroed counters on initialization, got tick=%d score=%d", snapA.Tick, snapA.Score)
+	}
+	if snapA.GameOver {
+		t.Fatalf("game should start as active")
+	}
+	if snapA.Snake[0] == snapA.Food {
+		t.Fatalf("food should not overlap the initial snake position")
+	}
+}
+
 func TestDeterministicTicksWithSameSeed(t *testing.T) {
 	first, err := NewEngine(6, 6, 123)
 	if err != nil {

@@ -152,6 +152,108 @@ func TestTickAdvancementStateTransitions(t *testing.T) {
 	}
 }
 
+func TestAdvanceTickStateTransitionsBoundarySequence(t *testing.T) {
+	const (
+		width  = 3
+		height = 2
+		seed   = int64(4242)
+	)
+
+	engine := mustEngine(t, width, height, seed)
+
+	start := engine.Snapshot()
+	engine.food = Point{X: start.Snake[0].X + 1, Y: start.Snake[0].Y}
+	engine.rng = rand.New(rand.NewSource(seed))
+
+	if ok := engine.QueueDirection(DirectionRight); !ok {
+		t.Fatalf("expected to queue initial move toward food")
+	}
+	engine.AdvanceTick()
+	afterGrowth := engine.Snapshot()
+
+	occupiedAfterGrowth := map[Point]struct{}{
+		afterGrowth.Snake[0]: {},
+		afterGrowth.Snake[1]: {},
+	}
+	expectedFood := deterministicEmptyCell(width, height, occupiedAfterGrowth, seed)
+
+	if afterGrowth.Tick != 1 {
+		t.Fatalf("tick mismatch after growth: expected 1, got %d", afterGrowth.Tick)
+	}
+	if afterGrowth.Score != 1 {
+		t.Fatalf("expected score to increment after eating, got %d", afterGrowth.Score)
+	}
+	if len(afterGrowth.Snake) != 2 {
+		t.Fatalf("expected snake to grow to length 2, got %d", len(afterGrowth.Snake))
+	}
+	if afterGrowth.Snake[0] != (Point{X: start.Snake[0].X + 1, Y: start.Snake[0].Y}) {
+		t.Fatalf("head mismatch after first move, got %+v", afterGrowth.Snake[0])
+	}
+	if afterGrowth.Food != expectedFood {
+		t.Fatalf("expected deterministic respawn at %+v, got %+v", expectedFood, afterGrowth.Food)
+	}
+	if afterGrowth.Direction != DirectionRight {
+		t.Fatalf("direction mismatch after growth: expected %v, got %v", DirectionRight, afterGrowth.Direction)
+	}
+	if engine.hasInput {
+		t.Fatalf("queued input should clear after processing growth")
+	}
+
+	if ok := engine.QueueDirection(DirectionUp); !ok {
+		t.Fatalf("expected to queue turn upward")
+	}
+	engine.AdvanceTick()
+	afterTurn := engine.Snapshot()
+
+	expectedHeadAfterTurn := Point{X: afterGrowth.Snake[0].X, Y: afterGrowth.Snake[0].Y - 1}
+	if afterTurn.GameOver {
+		t.Fatalf("did not expect game over while inside bounds")
+	}
+	if afterTurn.Tick != 2 {
+		t.Fatalf("tick mismatch after second move: expected 2, got %d", afterTurn.Tick)
+	}
+	if afterTurn.Score != 1 {
+		t.Fatalf("score should remain after moving without food, got %d", afterTurn.Score)
+	}
+	if afterTurn.Snake[0] != expectedHeadAfterTurn {
+		t.Fatalf("head mismatch after second move: expected %+v, got %+v", expectedHeadAfterTurn, afterTurn.Snake[0])
+	}
+	if afterTurn.Food != expectedFood {
+		t.Fatalf("food should remain until eaten, expected %+v got %+v", expectedFood, afterTurn.Food)
+	}
+	if afterTurn.Direction != DirectionUp {
+		t.Fatalf("direction mismatch after turning up: expected %v, got %v", DirectionUp, afterTurn.Direction)
+	}
+
+	if ok := engine.QueueDirection(DirectionUp); !ok {
+		t.Fatalf("expected to queue final move into boundary")
+	}
+	engine.AdvanceTick()
+	afterCollision := engine.Snapshot()
+
+	if !afterCollision.GameOver {
+		t.Fatalf("expected boundary collision to end the game")
+	}
+	if afterCollision.Tick != afterTurn.Tick {
+		t.Fatalf("tick should not advance after boundary collision, expected %d got %d", afterTurn.Tick, afterCollision.Tick)
+	}
+	if afterCollision.Score != afterTurn.Score {
+		t.Fatalf("score should remain unchanged after collision, expected %d got %d", afterTurn.Score, afterCollision.Score)
+	}
+	if afterCollision.Direction != DirectionUp {
+		t.Fatalf("direction should remain last processed input, expected %v got %v", DirectionUp, afterCollision.Direction)
+	}
+	if !reflect.DeepEqual(afterCollision.Snake, afterTurn.Snake) {
+		t.Fatalf("snake should remain unchanged after collision, before %+v after %+v", afterTurn.Snake, afterCollision.Snake)
+	}
+	if engine.hasInput {
+		t.Fatalf("queued input should clear even when collision occurs")
+	}
+	if engine.QueueDirection(DirectionLeft) {
+		t.Fatalf("should reject input after game over")
+	}
+}
+
 func TestEdgeCaseConstraintsAdditional(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +365,107 @@ func TestEdgeCaseConstraintsAdditional(t *testing.T) {
 			t.Fatalf("occupied count mismatch: expected %d, got %d", len(occupiedAfterGrowth), len(engine.occupied))
 		}
 		for _, point := range []Point{{X: 2, Y: 2}, {X: 1, Y: 0}} {
+			if _, ok := engine.occupied[point]; !ok {
+				t.Fatalf("expected external occupancy at %+v to persist", point)
+			}
+		}
+	})
+}
+
+func TestEdgeCaseConstraintsRespawnAndBoundaries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejects invalid dimensions", func(t *testing.T) {
+		t.Parallel()
+
+		engine, err := NewEngine(0, 3, 9)
+		if !errors.Is(err, ErrInvalidDimensions) {
+			t.Fatalf("expected ErrInvalidDimensions, got %v", err)
+		}
+		if engine != nil {
+			t.Fatalf("expected engine to be nil when initialization fails")
+		}
+	})
+
+	t.Run("single column boundary collision halts immediately", func(t *testing.T) {
+		engine := mustEngine(t, 1, 2, 303)
+		engine.food = Point{X: 0, Y: 0}
+
+		engine.AdvanceTick()
+		snap := engine.Snapshot()
+
+		if !snap.GameOver {
+			t.Fatalf("expected collision on first move to end game")
+		}
+		if snap.Tick != 0 {
+			t.Fatalf("tick should remain zero on immediate collision, got %d", snap.Tick)
+		}
+		if snap.Score != 0 {
+			t.Fatalf("score should remain zero after boundary collision, got %d", snap.Score)
+		}
+		if len(snap.Snake) != 1 {
+			t.Fatalf("snake length should remain one, got %d", len(snap.Snake))
+		}
+		if snap.Snake[0] != (Point{X: 0, Y: 1}) {
+			t.Fatalf("head should stay at starting cell, got %+v", snap.Snake[0])
+		}
+		if snap.Direction != DirectionRight {
+			t.Fatalf("direction should remain initial right, got %v", snap.Direction)
+		}
+		if snap.Food != (Point{X: 0, Y: 0}) {
+			t.Fatalf("food should remain unchanged after collision, got %+v", snap.Food)
+		}
+	})
+
+	t.Run("food respawn respects other players", func(t *testing.T) {
+		const seed = int64(881)
+
+		engine := mustEngine(t, 3, 3, seed)
+		engine.snake = []Point{{X: 1, Y: 1}}
+		engine.occupied = map[Point]struct{}{
+			{X: 1, Y: 1}: {},
+			{X: 0, Y: 0}: {},
+			{X: 2, Y: 2}: {},
+		}
+		engine.direction = DirectionRight
+		engine.food = Point{X: 2, Y: 1}
+		engine.rng = rand.New(rand.NewSource(seed))
+
+		if ok := engine.QueueDirection(DirectionRight); !ok {
+			t.Fatalf("expected to queue move toward food")
+		}
+
+		engine.AdvanceTick()
+		snap := engine.Snapshot()
+
+		if snap.GameOver {
+			t.Fatalf("did not expect collision when growing near other snakes")
+		}
+		if snap.Tick != 1 {
+			t.Fatalf("tick mismatch: expected 1, got %d", snap.Tick)
+		}
+		if snap.Score != 1 {
+			t.Fatalf("score should increment after eating, got %d", snap.Score)
+		}
+		if len(snap.Snake) != 2 {
+			t.Fatalf("expected snake to grow to length 2, got %d", len(snap.Snake))
+		}
+		if snap.Snake[0] != (Point{X: 2, Y: 1}) {
+			t.Fatalf("head mismatch after eating, got %+v", snap.Snake[0])
+		}
+
+		occupiedAfterGrowth := map[Point]struct{}{
+			{X: 2, Y: 1}: {},
+			{X: 1, Y: 1}: {},
+			{X: 0, Y: 0}: {},
+			{X: 2, Y: 2}: {},
+		}
+		expectedFood := deterministicEmptyCell(engine.width, engine.height, occupiedAfterGrowth, seed)
+
+		if snap.Food != expectedFood {
+			t.Fatalf("food respawn mismatch: expected %+v, got %+v", expectedFood, snap.Food)
+		}
+		for _, point := range []Point{{X: 0, Y: 0}, {X: 2, Y: 2}} {
 			if _, ok := engine.occupied[point]; !ok {
 				t.Fatalf("expected external occupancy at %+v to persist", point)
 			}
