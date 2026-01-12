@@ -218,6 +218,82 @@ func TestRandomEmptyCellReturnsErrWhenFull(t *testing.T) {
 	}
 }
 
+func TestRandomEmptyCellSequenceDeterministicAcrossRespawns(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 3
+		height = 3
+		seed   = int64(9091)
+	)
+
+	clone := func(src map[Point]struct{}) map[Point]struct{} {
+		dst := make(map[Point]struct{}, len(src))
+		for point := range src {
+			dst[point] = struct{}{}
+		}
+		return dst
+	}
+
+	initialOccupied := map[Point]struct{}{
+		{X: 1, Y: 1}: {}, // snake head
+		{X: 0, Y: 2}: {}, // other player segment
+	}
+
+	expectedOrder := func() []Point {
+		order := make([]Point, 0, width*height-len(initialOccupied))
+		occupied := clone(initialOccupied)
+		rng := rand.New(rand.NewSource(seed))
+
+		for len(occupied) < width*height {
+			free := make([]Point, 0, width*height-len(occupied))
+			for y := 0; y < height; y++ {
+				for x := 0; x < width; x++ {
+					point := Point{X: x, Y: y}
+					if _, taken := occupied[point]; !taken {
+						free = append(free, point)
+					}
+				}
+			}
+
+			chosen := free[rng.Intn(len(free))]
+			order = append(order, chosen)
+			occupied[chosen] = struct{}{}
+		}
+
+		return order
+	}()
+
+	engine := &Engine{
+		width:    width,
+		height:   height,
+		snake:    []Point{{X: 1, Y: 1}},
+		occupied: clone(initialOccupied),
+		rng:      rand.New(rand.NewSource(seed)),
+	}
+
+	var sequence []Point
+	for len(engine.occupied) < width*height {
+		cell, err := engine.randomEmptyCell()
+		if err != nil {
+			t.Fatalf("unexpected error before board filled: %v", err)
+		}
+		sequence = append(sequence, cell)
+		engine.occupied[cell] = struct{}{}
+	}
+
+	if _, err := engine.randomEmptyCell(); !errors.Is(err, ErrNoFreeCells) {
+		t.Fatalf("expected ErrNoFreeCells after occupying board, got %v", err)
+	}
+
+	if len(engine.occupied) != width*height {
+		t.Fatalf("expected board to be fully occupied, got %d cells", len(engine.occupied))
+	}
+	if !reflect.DeepEqual(sequence, expectedOrder) {
+		t.Fatalf("respawn sequence mismatch:\nexpected %v\ngot      %v", expectedOrder, sequence)
+	}
+}
+
 func TestAdvanceTickProcessesGrowthAndClearsInput(t *testing.T) {
 	t.Parallel()
 
