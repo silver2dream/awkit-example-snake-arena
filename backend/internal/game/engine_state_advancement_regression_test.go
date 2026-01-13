@@ -220,3 +220,154 @@ func TestAdvanceTickCollisionStopsProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestDeterministicSelfCollisionAcrossRuns(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T) *Engine {
+		t.Helper()
+
+		engine := mustEngine(t, 4, 4, 888)
+		engine.snake = []Point{{X: 2, Y: 2}, {X: 1, Y: 2}, {X: 1, Y: 1}}
+		engine.occupied = map[Point]struct{}{
+			{X: 2, Y: 2}: {},
+			{X: 1, Y: 2}: {},
+			{X: 1, Y: 1}: {},
+		}
+		engine.direction = DirectionRight
+		engine.food = Point{X: 3, Y: 3}
+
+		return engine
+	}
+
+	expected := Snapshot{
+		Width:     4,
+		Height:    4,
+		Snake:     []Point{{X: 2, Y: 2}, {X: 1, Y: 2}, {X: 1, Y: 1}},
+		Direction: DirectionLeft,
+		Food:      Point{X: 3, Y: 3},
+		Tick:      0,
+		GameOver:  true,
+		Score:     0,
+	}
+
+	first := build(t)
+	second := build(t)
+
+	for _, engine := range []*Engine{first, second} {
+		if ok := engine.QueueDirection(DirectionLeft); !ok {
+			t.Fatalf("expected to queue reversal to trigger self collision")
+		}
+		engine.AdvanceTick()
+	}
+
+	snapA := first.Snapshot()
+	snapB := second.Snapshot()
+
+	if !reflect.DeepEqual(snapA, expected) {
+		t.Fatalf("unexpected snapshot after self collision: got %+v, want %+v", snapA, expected)
+	}
+	if !reflect.DeepEqual(snapA, snapB) {
+		t.Fatalf("expected deterministic self-collision snapshots, got %+v and %+v", snapA, snapB)
+	}
+
+	for _, engine := range []*Engine{first, second} {
+		if engine.hasInput {
+			t.Fatalf("queued input flag should clear after processing collision")
+		}
+		if len(engine.occupied) != len(expected.Snake) {
+			t.Fatalf("expected %d occupied cells to remain, got %d", len(expected.Snake), len(engine.occupied))
+		}
+		for _, point := range expected.Snake {
+			if _, ok := engine.occupied[point]; !ok {
+				t.Fatalf("expected occupancy at %+v to persist after collision", point)
+			}
+		}
+	}
+}
+
+func TestDeterministicNoSpaceGameOverWithExternalOccupancy(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 3
+		height = 2
+		seed   = int64(5150)
+	)
+
+	build := func(t *testing.T) *Engine {
+		t.Helper()
+
+		engine := mustEngine(t, width, height, seed)
+		engine.snake = []Point{{X: 0, Y: 1}, {X: 0, Y: 0}}
+		engine.occupied = map[Point]struct{}{
+			{X: 0, Y: 1}: {},
+			{X: 0, Y: 0}: {},
+			{X: 1, Y: 0}: {}, // other snake
+			{X: 2, Y: 0}: {}, // other snake
+			{X: 2, Y: 1}: {}, // other snake
+		}
+		engine.direction = DirectionRight
+		engine.food = Point{X: 1, Y: 1}
+		engine.rng = rand.New(rand.NewSource(seed))
+
+		return engine
+	}
+
+	expectedSnake := []Point{
+		{X: 1, Y: 1},
+		{X: 0, Y: 1},
+		{X: 0, Y: 0},
+	}
+	expectedOccupied := map[Point]struct{}{
+		{X: 1, Y: 1}: {},
+		{X: 0, Y: 1}: {},
+		{X: 0, Y: 0}: {},
+		{X: 1, Y: 0}: {},
+		{X: 2, Y: 0}: {},
+		{X: 2, Y: 1}: {},
+	}
+	expectedSnap := Snapshot{
+		Width:     width,
+		Height:    height,
+		Snake:     expectedSnake,
+		Direction: DirectionRight,
+		Food:      Point{X: 1, Y: 1},
+		Tick:      1,
+		GameOver:  true,
+		Score:     0,
+	}
+
+	first := build(t)
+	second := build(t)
+
+	first.AdvanceTick()
+	second.AdvanceTick()
+
+	snapA := first.Snapshot()
+	snapB := second.Snapshot()
+
+	if !reflect.DeepEqual(snapA, expectedSnap) {
+		t.Fatalf("unexpected snapshot after no-space game over: got %+v, want %+v", snapA, expectedSnap)
+	}
+	if !reflect.DeepEqual(snapA, snapB) {
+		t.Fatalf("expected deterministic no-space snapshots, got %+v and %+v", snapA, snapB)
+	}
+
+	for _, engine := range []*Engine{first, second} {
+		if len(engine.occupied) != len(expectedOccupied) {
+			t.Fatalf("expected %d occupied cells, got %d", len(expectedOccupied), len(engine.occupied))
+		}
+		for point := range expectedOccupied {
+			if _, ok := engine.occupied[point]; !ok {
+				t.Fatalf("expected occupancy at %+v to persist", point)
+			}
+		}
+		if engine.hasInput {
+			t.Fatalf("queued input flag should clear after processing tick")
+		}
+		if engine.QueueDirection(DirectionLeft) {
+			t.Fatalf("should not accept new input after game over")
+		}
+	}
+}
