@@ -371,3 +371,117 @@ func TestDeterministicNoSpaceGameOverWithExternalOccupancy(t *testing.T) {
 		}
 	}
 }
+
+func TestDeterministicCollisionOutcomesAcrossRuns(t *testing.T) {
+	t.Parallel()
+
+	type expectation struct {
+		head      Point
+		length    int
+		direction Direction
+	}
+
+	tests := []struct {
+		name   string
+		build  func(t *testing.T) *Engine
+		queue  Direction
+		expect expectation
+		verify func(t *testing.T, engine *Engine)
+	}{
+		{
+			name: "boundary collision remains deterministic",
+			build: func(t *testing.T) *Engine {
+				engine := mustEngine(t, 1, 2, 9001)
+				engine.food = Point{X: 0, Y: 0}
+				return engine
+			},
+			queue: DirectionRight,
+			expect: expectation{
+				head:      Point{X: 0, Y: 1},
+				length:    1,
+				direction: DirectionRight,
+			},
+		},
+		{
+			name: "collision with other snake stays consistent",
+			build: func(t *testing.T) *Engine {
+				engine := mustEngine(t, 4, 3, 42424)
+				engine.snake = []Point{{X: 1, Y: 1}}
+				engine.occupied = map[Point]struct{}{
+					{X: 1, Y: 1}: {},
+					{X: 2, Y: 1}: {}, // other player segment
+				}
+				engine.direction = DirectionRight
+				engine.food = Point{X: 0, Y: 0}
+				return engine
+			},
+			queue: DirectionRight,
+			expect: expectation{
+				head:      Point{X: 1, Y: 1},
+				length:    1,
+				direction: DirectionRight,
+			},
+			verify: func(t *testing.T, engine *Engine) {
+				if _, ok := engine.occupied[Point{X: 2, Y: 1}]; !ok {
+					t.Fatalf("expected external occupancy to persist after collision")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			snapshots := make([]Snapshot, 0, 2)
+
+			for i := 0; i < 2; i++ {
+				engine := tt.build(t)
+				startTick := engine.tick
+
+				if ok := engine.QueueDirection(tt.queue); !ok {
+					t.Fatalf("expected to queue direction %v", tt.queue)
+				}
+
+				engine.AdvanceTick()
+				snap := engine.Snapshot()
+
+				if !snap.GameOver {
+					t.Fatalf("expected collision to end the game")
+				}
+				if snap.Tick != startTick {
+					t.Fatalf("tick should remain %d after immediate collision, got %d", startTick, snap.Tick)
+				}
+				if snap.Score != 0 {
+					t.Fatalf("score should remain zero after collision, got %d", snap.Score)
+				}
+				if len(snap.Snake) != tt.expect.length {
+					t.Fatalf("length mismatch: expected %d, got %d", tt.expect.length, len(snap.Snake))
+				}
+				if snap.Snake[0] != tt.expect.head {
+					t.Fatalf("head mismatch: expected %+v, got %+v", tt.expect.head, snap.Snake[0])
+				}
+				if snap.Direction != tt.expect.direction {
+					t.Fatalf("direction mismatch: expected %v, got %v", tt.expect.direction, snap.Direction)
+				}
+				if engine.hasInput {
+					t.Fatalf("queued input should clear after collision")
+				}
+
+				if tt.verify != nil {
+					tt.verify(t, engine)
+				}
+
+				snapshots = append(snapshots, snap)
+			}
+
+			if len(snapshots) != 2 {
+				t.Fatalf("expected two deterministic runs, got %d", len(snapshots))
+			}
+			if !reflect.DeepEqual(snapshots[0], snapshots[1]) {
+				t.Fatalf("expected deterministic snapshots across runs, got %+v and %+v", snapshots[0], snapshots[1])
+			}
+		})
+	}
+}
