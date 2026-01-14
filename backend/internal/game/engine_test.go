@@ -367,6 +367,37 @@ func TestRandomEmptyCellRespectsExternalOccupancy(t *testing.T) {
 	}
 }
 
+func TestRandomEmptyCellErrorDoesNotMutateState(t *testing.T) {
+	engine := &Engine{
+		width:  2,
+		height: 2,
+		snake:  []Point{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 0, Y: 1}, {X: 1, Y: 1}},
+		occupied: map[Point]struct{}{
+			{X: 0, Y: 0}: {},
+			{X: 1, Y: 0}: {},
+			{X: 0, Y: 1}: {},
+			{X: 1, Y: 1}: {},
+		},
+		rng: rand.New(rand.NewSource(99)),
+	}
+
+	beforeSnake := append([]Point(nil), engine.snake...)
+	beforeOccupied := make(map[Point]struct{}, len(engine.occupied))
+	for point := range engine.occupied {
+		beforeOccupied[point] = struct{}{}
+	}
+
+	if _, err := engine.randomEmptyCell(); !errors.Is(err, ErrNoFreeCells) {
+		t.Fatalf("expected ErrNoFreeCells when grid is full, got %v", err)
+	}
+	if !reflect.DeepEqual(engine.snake, beforeSnake) {
+		t.Fatalf("snake mutated while resolving empty cell error, before %+v after %+v", beforeSnake, engine.snake)
+	}
+	if !reflect.DeepEqual(engine.occupied, beforeOccupied) {
+		t.Fatalf("occupied cells mutated while resolving empty cell error, before %+v after %+v", beforeOccupied, engine.occupied)
+	}
+}
+
 func TestWallCollisionEndsGame(t *testing.T) {
 	engine, err := NewEngine(3, 3, 9)
 	if err != nil {
@@ -1347,6 +1378,39 @@ func TestAdvanceTickNoOpAfterGameOver(t *testing.T) {
 	}
 	if engine.pending != DirectionLeft {
 		t.Fatalf("pending direction should not be processed after game over, got %v", engine.pending)
+	}
+}
+
+func TestAdvanceTickCollisionClearsQueuedInputFlag(t *testing.T) {
+	engine, err := NewEngine(2, 2, 8080)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+
+	start := engine.Snapshot()
+	engine.food = Point{X: 0, Y: 0}
+
+	if queued := engine.QueueDirection(DirectionRight); !queued {
+		t.Fatalf("expected to queue initial movement")
+	}
+	if !engine.hasInput {
+		t.Fatalf("expected queued input to set hasInput flag")
+	}
+
+	engine.AdvanceTick()
+	snap := engine.Snapshot()
+
+	if !snap.GameOver {
+		t.Fatalf("expected wall collision to end game")
+	}
+	if snap.Tick != start.Tick {
+		t.Fatalf("tick should remain unchanged after immediate collision, expected %d got %d", start.Tick, snap.Tick)
+	}
+	if engine.hasInput {
+		t.Fatalf("queued input should clear after processing collision")
+	}
+	if engine.pending != DirectionRight {
+		t.Fatalf("pending direction should retain last processed input, got %v", engine.pending)
 	}
 }
 
