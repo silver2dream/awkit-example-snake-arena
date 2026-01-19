@@ -41,6 +41,43 @@ func TestNewEngineInitializesState(t *testing.T) {
 	}
 }
 
+func TestSnapshotIsImmutable(t *testing.T) {
+	t.Parallel()
+
+	engine, err := NewEngine(4, 4, 99)
+	if err != nil {
+		t.Fatalf("unexpected error creating engine: %v", err)
+	}
+	engine.food = Point{X: 0, Y: 0}
+
+	snap := engine.Snapshot()
+	originalHead := snap.Snake[0]
+
+	// Mutate the returned snapshot to ensure it does not affect engine state.
+	snap.Snake[0] = Point{X: originalHead.X + 5, Y: originalHead.Y + 5}
+	snap.Snake = append(snap.Snake, Point{X: 3, Y: 3})
+
+	frozen := engine.Snapshot()
+
+	if frozen.Snake[0] != originalHead {
+		t.Fatalf("mutating snapshot should not change engine head, expected %+v got %+v", originalHead, frozen.Snake[0])
+	}
+	if len(frozen.Snake) != 1 {
+		t.Fatalf("engine snake length should remain 1, got %d", len(frozen.Snake))
+	}
+
+	engine.AdvanceTick()
+	afterMove := engine.Snapshot()
+	expectedHead := Point{X: originalHead.X + 1, Y: originalHead.Y}
+
+	if afterMove.Snake[0] != expectedHead {
+		t.Fatalf("unexpected head after move, expected %+v got %+v", expectedHead, afterMove.Snake[0])
+	}
+	if len(afterMove.Snake) != 1 {
+		t.Fatalf("engine snake length should remain unchanged after move, got %d", len(afterMove.Snake))
+	}
+}
+
 func TestAdvanceTickMovesSnake(t *testing.T) {
 	engine, err := NewEngine(5, 5, 1)
 	if err != nil {
