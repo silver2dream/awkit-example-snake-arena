@@ -1,9 +1,7 @@
+import Lobby from './features/lobby/Lobby'
+
 function App() {
-  return (
-    <div>
-      <h1>Hello, World!</h1>
-    </div>
-  )
+  return <Lobby />
 }
 
 export default App
