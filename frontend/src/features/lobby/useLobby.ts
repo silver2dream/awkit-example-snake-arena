@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ConnectionState, RoomWebSocketClient } from '../../shared/websocketClient'
 import { createLobbyApi, defaultLobbyApi } from './api'
 import { LobbyApi, RoomSummary } from './types'
 
@@ -56,9 +57,10 @@ export function useLobby(options?: UseLobbyOptions) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isLoadingRooms, setIsLoadingRooms] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [connectionState, setConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
-  const socketRef = useRef<WebSocket | null>(null)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+  const socketRef = useRef<RoomWebSocketClient | null>(null)
   const playerIdRef = useRef<string>(getOrCreatePlayerId())
+  const connectionCleanupRef = useRef<(() => void) | null>(null)
 
   const refreshRooms = async () => {
     setIsLoadingRooms(true)
@@ -77,25 +79,36 @@ export function useLobby(options?: UseLobbyOptions) {
   useEffect(() => {
     void refreshRooms()
     return () => {
-      socketRef.current?.close()
+      connectionCleanupRef.current?.()
+      connectionCleanupRef.current = null
     }
   }, [api])
 
   const attachSocket = (roomId: string) => {
-    socketRef.current?.close()
+    connectionCleanupRef.current?.()
+    connectionCleanupRef.current = null
+
     const socket = api.connectToRoom(roomId, playerIdRef.current)
     if (!socket) {
       setConnectionState('disconnected')
       return
     }
-    setConnectionState('connecting')
-    socket.onopen = () => setConnectionState('connected')
-    socket.onclose = () => setConnectionState('disconnected')
-    socket.onerror = () => {
-      setConnectionState('disconnected')
-      setErrorMessage('Lost connection to the room socket.')
-    }
     socketRef.current = socket
+
+    const unsubscribers: Array<() => void> = []
+    unsubscribers.push(socket.subscribeState(setConnectionState))
+    unsubscribers.push(
+      socket.subscribeErrors((err) => {
+        setErrorMessage(err.message)
+      }),
+    )
+
+    connectionCleanupRef.current = () => {
+      unsubscribers.forEach((unsub) => unsub())
+      socket.disconnect()
+    }
+
+    socket.connect()
   }
 
   const createRoom = async () => {

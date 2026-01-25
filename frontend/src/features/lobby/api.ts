@@ -1,3 +1,4 @@
+import { createRoomWebSocketClient } from '../../shared/websocketClient'
 import { CreateRoomRequest, JoinRoomRequest, LobbyApi, RoomSummary } from './types'
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -28,6 +29,7 @@ export interface LobbyApiOptions {
   baseUrl?: string
   wsBaseUrl?: string
   fetchImpl?: FetchLike
+  createSocket?: (url: string) => WebSocket
 }
 
 export function createLobbyApi(options?: LobbyApiOptions): LobbyApi {
@@ -61,11 +63,18 @@ export function createLobbyApi(options?: LobbyApiOptions): LobbyApi {
     return parseJsonOrThrow<{ roomId: string }>(res)
   }
 
-  const connectToRoom = (roomId: string, playerId: string): WebSocket | null => {
-    if (typeof WebSocket === 'undefined') return null
+  const connectToRoom = (roomId: string, playerId: string) => {
+    const socketFactory = options?.createSocket
+    if (typeof WebSocket === 'undefined' && !socketFactory) return null
     const wsBase = wsBaseUrl.replace(/^http/i, 'ws')
-    const url = `${wsBase}/ws/rooms/${encodeURIComponent(roomId)}?playerId=${encodeURIComponent(playerId)}`
-    return new WebSocket(url)
+    const endpoint = `${wsBase}/ws/room/${encodeURIComponent(roomId)}?playerId=${encodeURIComponent(playerId)}`
+
+    return createRoomWebSocketClient({
+      endpoint,
+      roomId,
+      playerId,
+      createSocket: socketFactory,
+    })
   }
 
   return {
