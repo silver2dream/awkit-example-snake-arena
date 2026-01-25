@@ -1,3 +1,5 @@
+import type { RoomWebSocketClient } from '../../shared/websocketClient'
+
 export interface RoomSummary {
   id: string
   name?: string
@@ -18,5 +20,5 @@ export interface LobbyApi {
   listRooms: () => Promise<RoomSummary[]>
   createRoom: (request: CreateRoomRequest) => Promise<{ roomId: string }>
   joinRoom: (request: JoinRoomRequest) => Promise<{ roomId: string }>
-  connectToRoom: (roomId: string, playerId: string) => WebSocket | null
+  connectToRoom: (roomId: string, playerId: string) => RoomWebSocketClient | null
 }
