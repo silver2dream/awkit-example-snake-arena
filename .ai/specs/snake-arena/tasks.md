@@ -6,7 +6,7 @@
 - [x] Implement deterministic tick engine (grid, snake, food) <!-- Issue #21 -->
 - [x] Add WebSocket endpoint for room gameplay <!-- Issue #23 -->
 - [x] Add input validation + throttling on server <!-- Issue #25 -->
-- [ ] Add unit tests for tick/collision
+- [ ] Add unit tests for tick/collision <!-- Issue #38 -->
 
 ## Frontend
 
