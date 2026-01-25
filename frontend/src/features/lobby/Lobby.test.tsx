@@ -14,7 +14,7 @@ const buildApi = (overrides?: Partial<LobbyApi>): LobbyApi => ({
 })
 
 describe('Lobby', () => {
-  it('renders lobby shell with core controls (smoke)', () => {
+  it('TestLobbySmokeRendersCoreControls', () => {
     const html = renderToString(<Lobby api={buildApi()} />)
 
     expect(html).toContain('Snake Arena Lobby')
@@ -29,7 +29,7 @@ describe('Lobby', () => {
     expect(html).toContain('id="join-room-button"')
   })
 
-  it('validates room names and ids', () => {
+  it('TestLobbyValidatesRoomNamesAndIds', () => {
     expect(lobbyTestUtils.validateRoomName('')).toMatch(/enter a room name/i)
     expect(lobbyTestUtils.validateRoomName('ab')).toMatch(/at least/i)
     expect(lobbyTestUtils.validateRoomName('***')).toMatch(/may only contain/i)
@@ -40,7 +40,7 @@ describe('Lobby', () => {
     expect(lobbyTestUtils.validateRoomId('room-123')).toBeNull()
   })
 
-  it('surfaces backend errors from the API client', async () => {
+  it('TestLobbySurfacesBackendErrors', async () => {
     const fetchMock = vi.fn(async () => {
       const body = JSON.stringify({ error: 'boom' })
       return new Response(body, { status: 400, headers: { 'Content-Type': 'application/json' } })
