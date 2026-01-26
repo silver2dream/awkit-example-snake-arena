@@ -24,3 +24,4 @@ node_modules/
 .ai/logs/audit_project-2025-12-21.log
 .ai/logs/scan_repo-2025-12-21.log
 .ai/logs/validate_config-2025-12-21.log
+frontend/dist/
