@@ -132,6 +132,31 @@ describe('createRoomWebSocketClient', () => {
     expect(incoming).toEqual(['room_snapshot'])
   })
 
+  it('routes server error messages to error subscribers', () => {
+    const socket = new MockWebSocket('ws://example.test')
+    const errors: string[] = []
+    const types: string[] = []
+
+    const client = createRoomWebSocketClient({
+      endpoint: 'ws://example.test',
+      roomId: 'room-5',
+      playerId: 'player-5',
+      createSocket: () => socket as unknown as WebSocket,
+    })
+
+    client.subscribeMessages((msg) => types.push(msg.type))
+    client.subscribeErrors((err) => errors.push(err.message))
+
+    client.connect()
+    socket.open()
+
+    socket.emitMessage('{"type":"error","message":"room full","code":"room_full"}')
+
+    expect(types).toEqual(['error'])
+    expect(errors[0]).toMatch(/room full/i)
+    expect(errors[0]).toMatch(/room_full/i)
+  })
+
   it('surfaces JSON parsing errors to subscribers', () => {
     const socket = new MockWebSocket('ws://example.test')
     const errors: string[] = []
