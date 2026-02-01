@@ -45,7 +45,7 @@ class MockWebSocket {
 globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
 
 describe('createRoomWebSocketClient', () => {
-  it('emits connection state changes', () => {
+  it('TestRoomWebSocketEmitsConnectionStateChanges', () => {
     const states: ConnectionState[] = []
     const socket = new MockWebSocket('ws://example.test')
     const client = createRoomWebSocketClient({
@@ -65,7 +65,7 @@ describe('createRoomWebSocketClient', () => {
     expect(socket.sent[0]).toBeDefined() // join_room is sent on connect
   })
 
-  it('reconnects with exponential backoff until max attempts', () => {
+  it('TestRoomWebSocketReconnectsWithExponentialBackoffUntilMaxAttempts', () => {
     vi.useFakeTimers()
     const sockets: MockWebSocket[] = []
     const errors: string[] = []
@@ -103,7 +103,7 @@ describe('createRoomWebSocketClient', () => {
     vi.useRealTimers()
   })
 
-  it('serializes outgoing messages and parses incoming payloads', () => {
+  it('TestRoomWebSocketSerializesOutgoingAndParsesIncomingMessages', () => {
     const socket = new MockWebSocket('ws://example.test')
     const messages: string[] = []
     const incoming: string[] = []
@@ -132,7 +132,7 @@ describe('createRoomWebSocketClient', () => {
     expect(incoming).toEqual(['room_snapshot'])
   })
 
-  it('routes server error messages to error subscribers', () => {
+  it('TestRoomWebSocketRoutesServerErrorsToSubscribers', () => {
     const socket = new MockWebSocket('ws://example.test')
     const errors: string[] = []
     const types: string[] = []
@@ -157,7 +157,7 @@ describe('createRoomWebSocketClient', () => {
     expect(errors[0]).toMatch(/room_full/i)
   })
 
-  it('surfaces JSON parsing errors to subscribers', () => {
+  it('TestRoomWebSocketSurfacesJsonParsingErrors', () => {
     const socket = new MockWebSocket('ws://example.test')
     const errors: string[] = []
     const client = createRoomWebSocketClient({
