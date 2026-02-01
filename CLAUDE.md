@@ -112,7 +112,6 @@ touch .ai/state/STOP
 | What | Where |
 |------|-------|
 | Config | `.ai/config/workflow.yaml` |
-| Scripts | `.ai/scripts/` |
 | Skills | `.ai/skills/` |
 | Rules | `.ai/rules/` |
 | Specs | `.ai/specs/` |
@@ -154,5 +153,9 @@ touch .ai/state/STOP
 - frontend: `npm run build` and `npm run test -- --run`
 
 ## Acceptance Criteria
-- [ ] ...
+- [ ] <describe expected behavior, NOT test function names>
+- [ ] Unit tests added for new functionality
+- [ ] All tests pass
 ```
+
+**NOTE**: Acceptance Criteria should describe INTENT (expected behavior), NOT specific test function names. Worker decides test naming.

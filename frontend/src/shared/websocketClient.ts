@@ -110,9 +110,16 @@ export function createRoomWebSocketClient(options: RoomWebSocketClientOptions): 
       switch (parsed.type) {
         case 'room_snapshot':
         case 'tick_update':
-        case 'error':
           emitMessage(parsed as IncomingMessage)
           break
+        case 'error': {
+          const details = parsed as IncomingMessage & { message?: string; code?: string }
+          const summary = details.message ?? 'Server reported an error.'
+          const decorated = details.code ? `${summary} (code: ${details.code})` : summary
+          emitMessage(details)
+          emitError(new Error(decorated))
+          break
+        }
         default:
           emitError(new Error(`Unknown message type: ${parsed.type}`))
       }
