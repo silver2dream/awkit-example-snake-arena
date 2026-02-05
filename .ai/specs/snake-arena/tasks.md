@@ -12,8 +12,8 @@
 
 - [ ] Build lobby UI (create/join) <!-- Issue #40 -->
 - [ ] Add WebSocket client + reconnect basics <!-- Issue #44 -->
-- [ ] Implement canvas renderer for server snapshots
-- [ ] Implement keyboard input (direction) + basic throttling
+- [ ] Implement canvas renderer for server snapshots <!-- Issue #45 -->
+- [ ] Implement keyboard input (direction) + basic throttling <!-- Issue #46 -->
 
 ## Integration
 
