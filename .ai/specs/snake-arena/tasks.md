@@ -17,4 +17,4 @@
 
 ## Integration
 
-- [ ] Manual smoke instructions: run backend + open two tabs to play
+- [ ] Manual smoke instructions: run backend + open two tabs to play <!-- Issue #48 -->
