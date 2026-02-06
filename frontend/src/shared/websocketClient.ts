@@ -7,8 +7,27 @@ export type OutgoingMessage =
   | { type: 'input'; roomId: string; playerId: string; input: unknown }
 
 export type IncomingMessage =
-  | { type: 'room_snapshot'; snapshot?: unknown }
-  | { type: 'tick_update'; delta?: unknown }
+  | {
+      type: 'room_snapshot'
+      snapshot?: unknown
+      roomId?: unknown
+      tick?: unknown
+      players?: unknown
+      food?: unknown
+      width?: unknown
+      height?: unknown
+    }
+  | {
+      type: 'tick_update'
+      delta?: unknown
+      roomId?: unknown
+      tick?: unknown
+      snakes?: unknown
+      food?: unknown
+      scores?: unknown
+      gameOver?: unknown
+      direction?: unknown
+    }
   | { type: 'error'; message?: string; code?: string }
 
 export interface RoomWebSocketClientOptions {

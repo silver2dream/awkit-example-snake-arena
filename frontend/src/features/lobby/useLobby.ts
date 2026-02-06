@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ConnectionState, RoomWebSocketClient } from '../../shared/websocketClient'
+import type { GameSnapshot } from '../game/types'
+import { applyIncomingMessage } from '../game/snapshot'
 import { createLobbyApi, defaultLobbyApi } from './api'
 import { LobbyApi, RoomSummary } from './types'
 
@@ -58,6 +60,7 @@ export function useLobby(options?: UseLobbyOptions) {
   const [isLoadingRooms, setIsLoadingRooms] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+  const [gameSnapshot, setGameSnapshot] = useState<GameSnapshot | null>(null)
   const socketRef = useRef<RoomWebSocketClient | null>(null)
   const playerIdRef = useRef<string>(getOrCreatePlayerId())
   const connectionCleanupRef = useRef<(() => void) | null>(null)
@@ -107,6 +110,12 @@ export function useLobby(options?: UseLobbyOptions) {
       unsubscribers.forEach((unsub) => unsub())
       socket.disconnect()
     }
+
+    unsubscribers.push(
+      socket.subscribeMessages((message) => {
+        setGameSnapshot((previous) => applyIncomingMessage(previous, message))
+      }),
+    )
 
     socket.connect()
   }
@@ -186,6 +195,7 @@ export function useLobby(options?: UseLobbyOptions) {
     isLoadingRooms,
     isSubmitting,
     connectionState,
+    gameSnapshot,
     createRoom,
     joinRoom,
     refreshRooms,
