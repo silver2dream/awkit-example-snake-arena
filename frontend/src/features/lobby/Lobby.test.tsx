@@ -17,7 +17,7 @@ describe('Lobby', () => {
   it('TestLobbySmokeRendersCoreControls', () => {
     const html = renderToString(<Lobby api={buildApi()} />)
 
-    assert.include(html, 'Snake Arena Lobby')
+    assert(html.includes('Snake Arena Lobby'))
     expect(html).toContain('Snake Arena Lobby')
     expect(html).toContain('Create a room')
     expect(html).toContain('Room name')
