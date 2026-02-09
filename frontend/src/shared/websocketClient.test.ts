@@ -1,4 +1,4 @@
-import { assert, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ConnectionState } from './websocketClient'
 import { createRoomWebSocketClient } from './websocketClient'
 
@@ -61,7 +61,6 @@ describe('createRoomWebSocketClient', () => {
     socket.open()
     client.disconnect()
 
-    assert.deepEqual(states, ['disconnected', 'connecting', 'connected', 'disconnected'])
     expect(states).toEqual(['disconnected', 'connecting', 'connected', 'disconnected'])
     expect(socket.sent[0]).toBeDefined() // join_room is sent on connect
   })
@@ -89,7 +88,6 @@ describe('createRoomWebSocketClient', () => {
 
     // First attempt fails before opening.
     sockets[0].failClose()
-    assert.lengthOf(sockets, 1)
     expect(sockets).toHaveLength(1)
 
     vi.advanceTimersByTime(1000)
@@ -130,10 +128,6 @@ describe('createRoomWebSocketClient', () => {
 
     socket.emitMessage('{"type":"room_snapshot","snapshot":{"players":1}}')
 
-    assert.deepEqual(
-      messages.map((payload) => JSON.parse(payload).type),
-      ['join_room', 'input'],
-    )
     expect(messages.map((payload) => JSON.parse(payload).type)).toEqual(['join_room', 'input'])
     expect(incoming).toEqual(['room_snapshot'])
   })
@@ -158,7 +152,6 @@ describe('createRoomWebSocketClient', () => {
 
     socket.emitMessage('{"type":"error","message":"room full","code":"room_full"}')
 
-    assert.deepEqual(types, ['error'])
     expect(types).toEqual(['error'])
     expect(errors[0]).toMatch(/room full/i)
     expect(errors[0]).toMatch(/room_full/i)
@@ -179,7 +172,6 @@ describe('createRoomWebSocketClient', () => {
     socket.open()
 
     socket.emitMessage('not-json')
-    assert.isTrue(errors.some((msg) => msg.includes('parse')))
     expect(errors.some((msg) => msg.includes('parse'))).toBe(true)
   })
 })
