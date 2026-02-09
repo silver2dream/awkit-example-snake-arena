@@ -1,5 +1,5 @@
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { assert, describe, expect, it, vi } from 'vitest'
 import Lobby from './Lobby'
 import { createLobbyApi } from './api'
 import { lobbyTestUtils } from './useLobby'
@@ -17,6 +17,8 @@ describe('Lobby', () => {
   it('TestLobbySmokeRendersCoreControls', () => {
     const html = renderToString(<Lobby api={buildApi()} />)
 
+    assert.include(html, 'Snake Arena Lobby')
+    assert.include(html, 'id="game-canvas"')
     expect(html.includes('Snake Arena Lobby')).toBe(true)
     expect(html).toContain('Snake Arena Lobby')
     expect(html).toContain('Create a room')
