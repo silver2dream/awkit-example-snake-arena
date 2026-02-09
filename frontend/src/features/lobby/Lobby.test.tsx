@@ -1,5 +1,5 @@
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { assert, describe, expect, it, vi } from 'vitest'
 import Lobby from './Lobby'
 import { createLobbyApi } from './api'
 import { lobbyTestUtils } from './useLobby'
@@ -17,12 +17,18 @@ describe('Lobby', () => {
   it('TestLobbySmokeRendersCoreControls', () => {
     const html = renderToString(<Lobby api={buildApi()} />)
 
+    assert.include(html, 'Snake Arena Lobby')
+    assert.include(html, 'id="game-canvas"')
+    expect(html.includes('Snake Arena Lobby')).toBe(true)
     expect(html).toContain('Snake Arena Lobby')
     expect(html).toContain('Create a room')
     expect(html).toContain('Room name')
     expect(html).toContain('Join a room by ID')
     expect(html).toContain('Room ID')
     expect(html).toContain('Available rooms')
+    expect(html).toContain('Live arena')
+    expect(html).toContain('Scores')
+    expect(html).toContain('id="game-canvas"')
     expect(html).toContain('id="room-name-input"')
     expect(html).toContain('id="create-room-button"')
     expect(html).toContain('id="room-id-input"')
@@ -30,6 +36,7 @@ describe('Lobby', () => {
   })
 
   it('TestLobbyValidatesRoomNamesAndIds', () => {
+    expect(lobbyTestUtils.validateRoomName('') ?? '').toMatch(/enter a room name/i)
     expect(lobbyTestUtils.validateRoomName('')).toMatch(/enter a room name/i)
     expect(lobbyTestUtils.validateRoomName('ab')).toMatch(/at least/i)
     expect(lobbyTestUtils.validateRoomName('***')).toMatch(/may only contain/i)
@@ -49,6 +56,7 @@ describe('Lobby', () => {
     const api = createLobbyApi({ baseUrl: '', fetchImpl: fetchMock })
 
     await expect(api.createRoom({ name: 'Test', playerId: 'p1' })).rejects.toThrow(/boom/)
+    expect(fetchMock.mock.calls.length).toBe(1)
     expect(fetchMock).toHaveBeenCalled()
   })
 })

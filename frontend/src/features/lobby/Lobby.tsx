@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import GameCanvas from '../game/GameCanvas'
 import type { LobbyApi } from './types'
 import { useLobby } from './useLobby'
 
@@ -26,6 +27,7 @@ function Lobby({ api }: LobbyProps) {
     isLoadingRooms,
     isSubmitting,
     connectionState,
+    gameSnapshot,
     createRoom,
     joinRoom,
     refreshRooms,
@@ -147,6 +149,10 @@ function Lobby({ api }: LobbyProps) {
             {isSubmitting ? 'Joining…' : 'Join room'}
           </button>
         </form>
+      </Section>
+
+      <Section title="Game">
+        <GameCanvas snapshot={gameSnapshot} />
       </Section>
 
       <Section title="Available rooms">

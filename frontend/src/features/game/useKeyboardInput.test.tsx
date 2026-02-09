@@ -74,6 +74,7 @@ describe('useKeyboardInput', () => {
       vi.advanceTimersByTime(60)
       target.dispatch('ArrowRight')
 
+      expect(client.sendInput.mock.calls.length).toBe(3)
       expect(client.sendInput).toHaveBeenCalledWith({ direction: 'up' })
       expect(client.sendInput).toHaveBeenCalledWith({ direction: 'left' })
       expect(client.sendInput).toHaveBeenCalledWith({ direction: 'right' })
@@ -99,6 +100,7 @@ describe('useKeyboardInput', () => {
       target.dispatch('ArrowDown')
       target.dispatch('s')
 
+      expect(client.sendInput.mock.calls.length).toBe(1)
       expect(client.sendInput).toHaveBeenCalledTimes(1)
 
       vi.advanceTimersByTime(110)
@@ -120,6 +122,7 @@ describe('useKeyboardInput', () => {
     })
 
     target.dispatch('ArrowUp')
+    expect(client.sendInput.mock.calls.length).toBe(1)
     expect(client.sendInput).toHaveBeenCalledTimes(1)
     expect(target.listenerCount()).toBe(1)
 
