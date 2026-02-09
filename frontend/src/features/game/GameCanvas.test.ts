@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 import { render } from './GameCanvas'
 import type { GameSnapshot } from './types'
 
@@ -84,7 +84,7 @@ describe('GameCanvas render', () => {
     const lineCalls = calls.filter((call) => call.method === 'lineTo')
     const boundaryCall = calls.find((call) => call.method === 'strokeRect')
 
-    expect(moveCalls.length).toBe(23)
+    assert.lengthOf(moveCalls, 23)
     expect(lineCalls.length).toBe(23)
     expect(boundaryCall).toBeDefined()
     expect(boundaryCall?.args.slice(0, 4)).toEqual([0, 0, 240, 180])
@@ -99,7 +99,7 @@ describe('GameCanvas render', () => {
     const fillRects = readFillRects(ctx as unknown as MockCanvasRenderingContext2D)
     const [background, aliceHead, aliceBody, bobHead] = fillRects
 
-    expect(background.slice(0, 4)).toEqual([0, 0, 200, 160])
+    assert.deepEqual(background.slice(0, 4), [0, 0, 200, 160])
     expect(aliceHead.slice(0, 4)).toEqual([41, 61, 18, 18])
     expect(aliceBody.slice(0, 4)).toEqual([21, 61, 18, 18])
     expect(bobHead.slice(0, 4)).toEqual([141, 21, 18, 18])
@@ -114,7 +114,7 @@ describe('GameCanvas render', () => {
     const fillRects = readFillRects(ctx as unknown as MockCanvasRenderingContext2D)
     const foodRect = fillRects[4]
 
-    expect(foodRect.slice(0, 4)).toEqual([101, 81, 18, 18])
+    assert.deepEqual(foodRect.slice(0, 4), [101, 81, 18, 18])
     expect(foodRect[4]).toBe('#ef4444')
   })
 
@@ -129,7 +129,7 @@ describe('GameCanvas render', () => {
     const overlayRect = fillRects[5]
     const gameOverText = calls.find((call) => call.method === 'fillText')
 
-    expect(overlayRect.slice(0, 4)).toEqual([0, 0, 200, 160])
+    assert.deepEqual(overlayRect.slice(0, 4), [0, 0, 200, 160])
     expect(gameOverText).toBeDefined()
     expect(gameOverText?.args[0]).toBe('Game Over')
     expect(gameOverText?.args[1]).toBe(100)

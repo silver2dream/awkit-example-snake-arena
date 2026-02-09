@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 import { applyIncomingMessage } from './snapshot'
 import type { GameSnapshot } from './types'
 
@@ -23,7 +23,7 @@ describe('snapshot message parsing', () => {
       food: { X: 4, Y: 5 },
     })
 
-    expect(next).not.toBeNull()
+    assert.isNotNull(next)
     expect(next?.width).toBe(31)
     expect(next?.height).toBe(17)
     expect(next?.players).toEqual(['alice', 'bob'])
@@ -47,7 +47,7 @@ describe('snapshot message parsing', () => {
       gameOver: true,
     })
 
-    expect(next).not.toBeNull()
+    assert.isNotNull(next)
     expect(next?.tick).toBe(9)
     expect(next?.snakes.alice).toEqual([
       { x: 2, y: 3 },
@@ -70,7 +70,7 @@ describe('snapshot message parsing', () => {
       gameOver: false,
     })
 
-    expect(next).not.toBeNull()
+    assert.isNotNull(next)
     expect(next?.snakes.alice).toEqual([{ x: 2, y: 4 }])
     expect(next?.food).toBeNull()
   })
