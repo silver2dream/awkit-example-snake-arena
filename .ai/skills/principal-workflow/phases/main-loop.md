@@ -9,7 +9,7 @@ awkit analyze-next --json
 ```
 
 輸出 JSON 包含：
-- `next_action`: generate_tasks | create_task | dispatch_worker | check_result | review_pr | all_complete | none
+- `next_action`: generate_tasks | create_task | dispatch_worker | check_result | review_pr | audit_epic | all_complete | none
 - `issue_number`, `pr_number`, `spec_name`, `task_line`, `exit_reason`
 - `merge_issue`: conflict | rebase（當 Worker 需要處理 merge 問題時）
 - `epic_issue`, `task_text`（僅 epic 模式：tracking issue 編號和任務文字）
@@ -24,6 +24,7 @@ awkit analyze-next --json
 |-------------|------|
 | `generate_tasks` | **Read** `tasks/generate-tasks.md`，根據 tracking mode 執行任務生成（推薦 GitHub Epic，或 tasks.md） |
 | `create_task` | **Read** `tasks/create-task.md`，使用 `epic_issue` 和 `task_text`（epic 模式）或 `spec_name` 和 `task_line`（tasks_md 模式）執行 Issue 創建 |
+| `audit_epic` | **Read** `tasks/audit-epic-review.md`，執行 `awkit audit-epic --spec <spec_name>` 並根據結果補充缺漏任務 |
 | `dispatch_worker` | 執行 dispatch（**必須先檢查 merge_issue**）⚠️ **同步等待** |
 | `check_result` | 執行 `awkit check-result --issue <issue_number>` |
 | `review_pr` | 調用 `pr-reviewer` subagent（見下方詳細說明） |
@@ -157,6 +158,12 @@ Loop Safety 由 `awkit analyze-next` 自動處理：
 
 無需額外操作。
 
-## Step 4: 回到 Step 1
+## Step 4: Context Management
+
+如果你發現對話變得很長或已經跑了很多輪迭代：
+- 讀取 `.ai/skills/principal-workflow/references/compaction-strategy.md` 了解如何管理 context
+- 執行 `awkit context-snapshot` 取得精簡的狀態摘要，用於 context 壓縮後重建上下文
+
+## Step 5: 回到 Step 1
 
 除非已經結束（`all_complete` 或 `none`）。
