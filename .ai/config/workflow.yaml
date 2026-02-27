@@ -1,102 +1,88 @@
-# AWK Configuration (React + Go)
-version: "1.2"
-
+version: '1.2'
 project:
-  name: "awkit-example-snake-arena"
-  description: "React + Go project using AWK"
-  type: "monorepo"
-
+  name: awkit-example-snake-arena
+  description: React + Go project using AWK
+  type: monorepo
 repos:
-  - name: backend
-    path: backend/
-    type: directory
-    language: go
-    verify:
-      build: "go build ./..."
-      test: "go test ./..."
-
-  - name: frontend
-    path: frontend/
-    type: directory
-    language: typescript
-    node_version: "20"
-    package_manager: "npm"
-    verify:
-      build: "npm run build"
-      test: "npm run test -- --run"
-
+- name: backend
+  path: backend/
+  type: directory
+  language: go
+  verify:
+    build: go build ./...
+    test: go test ./...
+- name: frontend
+  path: frontend/
+  type: directory
+  language: typescript
+  node_version: '20'
+  package_manager: npm
+  verify:
+    build: npm run build
+    test: npm run test -- --run
 git:
-  integration_branch: "feat/example"
-  release_branch: "main"
-  commit_format: "[type] subject"
-
+  integration_branch: feat/example
+  release_branch: main
+  commit_format: '[type] subject'
 specs:
-  base_path: ".ai/specs"
+  base_path: .ai/specs
   files:
-    requirements: "requirements.md"
-    design: "design.md"
-    tasks: "tasks.md"
+    requirements: requirements.md
+    design: design.md
+    tasks: tasks.md
   auto_generate_tasks: true
   active:
-    - snake-arena
+  - snake-arena
   tracking:
     mode: github_epic
-    snake-arena:
-      epic_issue: 51
-
+    epic_issues:
+      snake-arena: 51
 tasks:
   format:
-    uncompleted: "- [ ]"
-    completed: "- [x]"
-    optional: "- [ ]*"
+    uncompleted: '- [ ]'
+    completed: '- [x]'
+    optional: '- [ ]*'
   source_priority:
-    - audit
-    - specs
-
+  - audit
+  - specs
 audit:
   checks:
-    - dirty-worktree
-    - submodule-sync
-    - missing-tests
-    - missing-ci
+  - dirty-worktree
+  - submodule-sync
+  - missing-tests
+  - missing-ci
   custom: []
-
 github:
-  repo: ""
+  repo: ''
   labels:
-    task: "ai-task"
-    in_progress: "in-progress"
-    pr_ready: "pr-ready"
-    worker_failed: "worker-failed"
-    needs_human_review: "needs-human-review"
-    review_failed: "review-failed"
-    merge_conflict: "merge-conflict"
-    needs_rebase: "needs-rebase"
-
+    task: ai-task
+    in_progress: in-progress
+    pr_ready: pr-ready
+    worker_failed: worker-failed
+    needs_human_review: needs-human-review
+    review_failed: review-failed
+    merge_conflict: merge-conflict
+    needs_rebase: needs-rebase
 rules:
   kit:
-    - git-workflow
+  - git-workflow
   custom:
-    - backend-go
-    - frontend-react
-
+  - backend-go
+  - frontend-react
 agents:
   builtin:
-    - pr-reviewer
-    - conflict-resolver
+  - pr-reviewer
+  - conflict-resolver
   custom: []
-
 timeouts:
   git_seconds: 120
   gh_seconds: 60
   codex_minutes: 30
   gh_retry_count: 3
   gh_retry_base_delay: 2
-
 review:
   score_threshold: 7
   merge_strategy: squash
-
 escalation:
   triggers: []
   max_consecutive_failures: 3
@@ -104,12 +90,9 @@ escalation:
   retry_delay_seconds: 5
   max_single_pr_files: 50
   max_single_pr_lines: 500
-
 feedback:
   enabled: true
   max_history_in_prompt: 10
-
 hooks: {}
-
 worker:
   backend: codex
