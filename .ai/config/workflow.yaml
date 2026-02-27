@@ -38,7 +38,8 @@ specs:
     design: "design.md"
     tasks: "tasks.md"
   auto_generate_tasks: true
-  active: []
+  active: 
+    - snake-arena
 
 tasks:
   format:
