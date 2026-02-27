@@ -1,5 +1,5 @@
 # AWK Configuration (React + Go)
-version: "1.0"
+version: "1.2"
 
 project:
   name: "awkit-example-snake-arena"
@@ -74,3 +74,37 @@ rules:
   custom:
     - backend-go
     - frontend-react
+
+agents:
+  builtin:
+    - pr-reviewer
+    - conflict-resolver
+  custom: []
+
+timeouts:
+  git_seconds: 120
+  gh_seconds: 60
+  codex_minutes: 30
+  gh_retry_count: 3
+  gh_retry_base_delay: 2
+
+review:
+  score_threshold: 7
+  merge_strategy: squash
+
+escalation:
+  triggers: []
+  max_consecutive_failures: 3
+  retry_count: 2
+  retry_delay_seconds: 5
+  max_single_pr_files: 50
+  max_single_pr_lines: 500
+
+feedback:
+  enabled: true
+  max_history_in_prompt: 10
+
+hooks: {}
+
+worker:
+  backend: codex
