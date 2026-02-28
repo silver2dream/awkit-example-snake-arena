@@ -16,18 +16,36 @@ describe('snapshot message parsing', () => {
   it('TestApplyRoomSnapshotUsesDynamicGridSizeAndPlayers', () => {
     const next = applyIncomingMessage(baseState, {
       type: 'room_snapshot',
-      tick: 3,
-      width: 31,
-      height: 17,
-      players: ['alice', 'bob'],
-      food: { X: 4, Y: 5 },
+      roomId: 'room-1',
+      snapshot: {
+        tick: 3,
+        width: 31,
+        height: 17,
+        players: [
+          {
+            id: 'player-1',
+            name: 'alice',
+            score: 0,
+            alive: true,
+            body: [{ X: 1, Y: 1 }],
+          },
+          {
+            id: 'player-2',
+            name: 'bob',
+            score: 0,
+            alive: true,
+            body: [{ X: 2, Y: 2 }],
+          },
+        ],
+        food: { X: 4, Y: 5 },
+      },
     })
 
     expect(next).not.toBeNull()
     expect(next?.width).toBe(31)
     expect(next?.height).toBe(17)
     expect(next?.players).toEqual(['alice', 'bob'])
-    expect(next?.snakes.alice).toEqual([])
+    expect(next?.snakes.alice).toEqual([{ x: 1, y: 1 }])
     expect(next?.scores.bob).toBe(0)
     expect(next?.food).toEqual({ x: 4, y: 5 })
   })
@@ -35,16 +53,23 @@ describe('snapshot message parsing', () => {
   it('TestApplyTickUpdateMapsSnakeFoodScoresAndGameOver', () => {
     const next = applyIncomingMessage(baseState, {
       type: 'tick_update',
-      tick: 9,
-      snakes: {
-        alice: [
-          { X: 2, Y: 3 },
-          { x: 1, y: 3 },
+      roomId: 'room-1',
+      snapshot: {
+        tick: 9,
+        players: [
+          {
+            id: 'player-1',
+            name: 'alice',
+            score: 6,
+            alive: false,
+            body: [
+              { X: 2, Y: 3 },
+              { x: 1, y: 3 },
+            ],
+          },
         ],
+        food: { x: 7, y: 8 },
       },
-      food: { x: 7, y: 8 },
-      scores: { alice: 6 },
-      gameOver: true,
     })
 
     expect(next).not.toBeNull()
@@ -61,13 +86,20 @@ describe('snapshot message parsing', () => {
   it('TestApplySnapshotIgnoresMalformedPoints', () => {
     const next = applyIncomingMessage(baseState, {
       type: 'tick_update',
-      tick: 2,
-      snakes: {
-        alice: [{ x: 2 }, { x: 2, y: 4 }],
+      roomId: 'room-1',
+      snapshot: {
+        tick: 2,
+        players: [
+          {
+            id: 'player-1',
+            name: 'alice',
+            score: 1,
+            alive: true,
+            body: [{ x: 2 }, { x: 2, y: 4 }],
+          },
+        ],
+        food: { y: 3 },
       },
-      food: { y: 3 },
-      scores: { alice: 1 },
-      gameOver: false,
     })
 
     expect(next).not.toBeNull()

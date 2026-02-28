@@ -9,14 +9,33 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 
 const toNumber = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null)
 
-const toGridValue = (value: unknown, fallback: number) => {
-  const parsed = toNumber(value)
-  return parsed !== null && Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
-}
-
 const toInteger = (value: unknown, fallback: number) => {
   const parsed = toNumber(value)
   return parsed !== null ? Math.round(parsed) : fallback
+}
+
+const toOptionalInteger = (value: unknown): number | null => {
+  const parsed = toNumber(value)
+  return parsed !== null ? Math.round(parsed) : null
+}
+
+const toOptionalGridValue = (value: unknown): number | null => {
+  const parsed = toNumber(value)
+  return parsed !== null && Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const toGridValue = (value: unknown, fallback: number) => {
+  const parsed = toOptionalGridValue(value)
+  return parsed ?? fallback
+}
+
+const toOptionalString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 const parseGridPoint = (value: unknown): GridPoint | null => {
@@ -55,47 +74,108 @@ const parseScores = (value: unknown): Record<string, number> => {
   }, {})
 }
 
-const parsePlayers = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string')
+interface ParsedPlayers {
+  order: string[]
+  snakes: Record<string, GridPoint[]>
+  scores: Record<string, number>
+  aliveStates: boolean[]
 }
 
-const ensurePlayerEntries = (snapshot: GameSnapshot, players: string[]) => {
-  players.forEach((playerId) => {
-    if (!snapshot.snakes[playerId]) {
-      snapshot.snakes[playerId] = []
+const parsePlayers = (value: unknown): ParsedPlayers => {
+  const parsed: ParsedPlayers = {
+    order: [],
+    snakes: {},
+    scores: {},
+    aliveStates: [],
+  }
+
+  if (!Array.isArray(value)) {
+    return parsed
+  }
+
+  value.forEach((playerEntry) => {
+    if (typeof playerEntry === 'string') {
+      parsed.order.push(playerEntry)
+      return
     }
-    if (snapshot.scores[playerId] === undefined) {
-      snapshot.scores[playerId] = 0
+
+    const player = asObject(playerEntry)
+    if (!player) {
+      return
+    }
+
+    const playerKey = toOptionalString(player.name) ?? toOptionalString(player.id)
+    if (!playerKey) {
+      return
+    }
+
+    parsed.order.push(playerKey)
+    parsed.snakes[playerKey] = parseSnake(player.body)
+    parsed.scores[playerKey] = toInteger(player.score, 0)
+
+    if (typeof player.alive === 'boolean') {
+      parsed.aliveStates.push(player.alive)
     }
   })
+
+  parsed.order = Array.from(new Set(parsed.order))
+  return parsed
 }
 
-const fromRoomSnapshot = (message: IncomingMessage): Partial<GameSnapshot> | null => {
-  if (message.type !== 'room_snapshot') return null
-
-  const players = parsePlayers(message.players)
-  const snapshot: Partial<GameSnapshot> = {
-    tick: toInteger(message.tick, 0),
-    width: toGridValue(message.width, DEFAULT_GRID_WIDTH),
-    height: toGridValue(message.height, DEFAULT_GRID_HEIGHT),
-    food: parseGridPoint(message.food),
-    players,
+const resolveSnapshotPayload = (message: IncomingMessage): Record<string, unknown> | null => {
+  if (message.type === 'error') {
+    return null
   }
 
-  return snapshot
+  return asObject(message.snapshot)
 }
 
-const fromTickUpdate = (message: IncomingMessage): Partial<GameSnapshot> | null => {
-  if (message.type !== 'tick_update') return null
-
-  return {
-    tick: toInteger(message.tick, 0),
-    snakes: parseSnakes(message.snakes),
-    food: parseGridPoint(message.food),
-    scores: parseScores(message.scores),
-    gameOver: Boolean(message.gameOver),
+const fromSnapshotMessage = (message: IncomingMessage): Partial<GameSnapshot> | null => {
+  if (message.type !== 'room_snapshot' && message.type !== 'tick_update') {
+    return null
   }
+
+  const payload = resolveSnapshotPayload(message)
+  if (!payload) {
+    return null
+  }
+
+  const players = parsePlayers(payload.players)
+  const patch: Partial<GameSnapshot> = {
+    players: players.order,
+    snakes: {
+      ...parseSnakes(payload.snakes),
+      ...players.snakes,
+    },
+    scores: {
+      ...parseScores(payload.scores),
+      ...players.scores,
+    },
+    food: parseGridPoint(payload.food),
+  }
+
+  const tick = toOptionalInteger(payload.tick)
+  if (tick !== null) {
+    patch.tick = tick
+  }
+
+  const width = toOptionalGridValue(payload.width)
+  if (width !== null) {
+    patch.width = width
+  }
+
+  const height = toOptionalGridValue(payload.height)
+  if (height !== null) {
+    patch.height = height
+  }
+
+  if (typeof payload.gameOver === 'boolean') {
+    patch.gameOver = payload.gameOver
+  } else if (players.aliveStates.length > 0) {
+    patch.gameOver = players.aliveStates.every((alive) => !alive)
+  }
+
+  return patch
 }
 
 const toCompleteSnapshot = (state: Partial<GameSnapshot>): GameSnapshot => ({
@@ -109,28 +189,31 @@ const toCompleteSnapshot = (state: Partial<GameSnapshot>): GameSnapshot => ({
   players: state.players,
 })
 
+const ensurePlayerEntries = (snapshot: GameSnapshot, players: string[]) => {
+  players.forEach((playerId) => {
+    if (!snapshot.snakes[playerId]) {
+      snapshot.snakes[playerId] = []
+    }
+    if (snapshot.scores[playerId] === undefined) {
+      snapshot.scores[playerId] = 0
+    }
+  })
+}
+
 export function applyIncomingMessage(previous: GameSnapshot | null, message: IncomingMessage): GameSnapshot | null {
   if (message.type === 'error') {
     return previous
   }
 
-  const roomPatch = fromRoomSnapshot(message)
-  if (roomPatch) {
-    const next = toCompleteSnapshot({ ...previous, ...roomPatch })
-    if (next.players?.length) {
-      ensurePlayerEntries(next, next.players)
-    }
-    return next
+  const patch = fromSnapshotMessage(message)
+  if (!patch) {
+    return previous
   }
 
-  const tickPatch = fromTickUpdate(message)
-  if (tickPatch) {
-    const next = toCompleteSnapshot({ ...previous, ...tickPatch })
-    if (next.players?.length) {
-      ensurePlayerEntries(next, next.players)
-    }
-    return next
+  const next = toCompleteSnapshot({ ...previous, ...patch })
+  if (next.players?.length) {
+    ensurePlayerEntries(next, next.players)
   }
 
-  return previous
+  return next
 }
