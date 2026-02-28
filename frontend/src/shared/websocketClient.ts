@@ -103,15 +103,28 @@ interface WebSocketClientOptions {
 
 const defaultWebSocketFactory = (url: string): WebSocket => new WebSocket(url)
 
-const toWebSocketURL = (roomId: string) => {
+interface WebSocketLocation {
+  protocol: string
+  host: string
+}
+
+export const buildWebSocketURL = (roomId: string, location?: WebSocketLocation | null) => {
   const encodedRoomId = encodeURIComponent(roomId)
 
-  if (typeof window === 'undefined' || !window.location) {
+  if (!location) {
     return `ws://localhost/ws/room/${encodedRoomId}`
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${protocol}://${window.location.host}/ws/room/${encodedRoomId}`
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${protocol}://${location.host}/ws/room/${encodedRoomId}`
+}
+
+const toWebSocketURL = (roomId: string) => {
+  if (typeof window === 'undefined' || !window.location) {
+    return buildWebSocketURL(roomId)
+  }
+
+  return buildWebSocketURL(roomId, window.location)
 }
 
 export class WebSocketClient {
