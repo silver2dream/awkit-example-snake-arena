@@ -58,6 +58,40 @@ func TestBufferedInputAppliesOnNextTickAndNoReverse(t *testing.T) {
 	}
 }
 
+func TestBufferedInputDefersMovementForPlayerSnakeModel(t *testing.T) {
+	engine := NewEngine(7)
+	state := NewGameState(8, 8)
+	state.Players["p1"] = &Player{
+		ID:   "p1",
+		Name: "P1",
+		Snake: &Snake{
+			PlayerID:  "p1",
+			Body:      []Position{{X: 4, Y: 4}, {X: 3, Y: 4}},
+			Direction: DirectionRight,
+			Alive:     true,
+		},
+	}
+
+	engine.BufferInput(state, "p1", DirectionUp)
+
+	if got, want := state.Players["p1"].Snake.Direction, DirectionRight; got != want {
+		t.Fatalf("direction should not change before tick: got %s want %s", got, want)
+	}
+	if got, want := state.Players["p1"].Snake.Body[0], (Position{X: 4, Y: 4}); got != want {
+		t.Fatalf("head should not move before tick: got %+v want %+v", got, want)
+	}
+
+	engine.AdvanceTick(state)
+
+	snake := state.Players["p1"].Snake
+	if got, want := snake.Direction, DirectionUp; got != want {
+		t.Fatalf("direction mismatch after tick: got %s want %s", got, want)
+	}
+	if got, want := snake.Body[0], (Position{X: 4, Y: 3}); got != want {
+		t.Fatalf("head mismatch after tick: got %+v want %+v", got, want)
+	}
+}
+
 func TestWallCollisionKillsSnakeAtBoundaryLengthOne(t *testing.T) {
 	engine := NewEngine(3)
 	state := NewGameState(5, 5)

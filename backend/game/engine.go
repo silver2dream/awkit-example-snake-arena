@@ -23,6 +23,7 @@ func (e *Engine) BufferInput(state *GameState, playerID string, direction Direct
 	if state == nil || !direction.valid() {
 		return
 	}
+	e.syncSnakesWithPlayers(state)
 	snake, ok := state.Snakes[playerID]
 	if !ok || snake == nil || !snake.Alive || len(snake.Body) == 0 {
 		return
@@ -51,6 +52,7 @@ func (e *Engine) AdvanceTick(state *GameState) {
 	if state.BufferedInputs == nil {
 		state.BufferedInputs = make(map[string]Direction)
 	}
+	e.syncSnakesWithPlayers(state)
 
 	ids := sortedSnakeIDs(state.Snakes)
 
@@ -178,6 +180,7 @@ func (e *Engine) spawnFood(state *GameState) *Food {
 	if state == nil || state.Width <= 0 || state.Height <= 0 {
 		return nil
 	}
+	e.syncSnakesWithPlayers(state)
 
 	occupied := make(map[Position]struct{})
 	for _, id := range sortedSnakeIDs(state.Snakes) {
@@ -205,6 +208,39 @@ func (e *Engine) spawnFood(state *GameState) *Food {
 		return nil
 	}
 	return &Food{Position: empty[e.rng.Intn(len(empty))]}
+}
+
+func (e *Engine) syncSnakesWithPlayers(state *GameState) {
+	if state == nil {
+		return
+	}
+	if state.Snakes == nil {
+		state.Snakes = make(map[string]*Snake)
+	}
+	if state.Players == nil {
+		return
+	}
+
+	for playerID, player := range state.Players {
+		if player == nil {
+			continue
+		}
+
+		snake := state.Snakes[playerID]
+		if snake == nil && player.Snake != nil {
+			snake = player.Snake
+			state.Snakes[playerID] = snake
+		}
+		if snake == nil {
+			continue
+		}
+		if snake.PlayerID == "" {
+			snake.PlayerID = playerID
+		}
+		if player.Snake == nil {
+			player.Snake = snake
+		}
+	}
 }
 
 func sortedSnakeIDs(snakes map[string]*Snake) []string {
