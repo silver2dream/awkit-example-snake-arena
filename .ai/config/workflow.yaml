@@ -22,6 +22,7 @@ repos:
     node_version: "20"
     package_manager: "npm"
     verify:
+      setup: "npm ci 2>/dev/null || npm install"
       build: "npm run build"
       test: "npm run test -- --run"
 
@@ -37,8 +38,8 @@ specs:
     design: "design.md"
     tasks: "tasks.md"
   auto_generate_tasks: true
-  active:
-    - snake-arena
+  active: 
+   - snake-arena
 
 tasks:
   format:

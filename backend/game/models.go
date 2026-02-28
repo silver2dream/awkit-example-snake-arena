@@ -33,7 +33,14 @@ type Food struct {
 type Player struct {
 	ID    string
 	Name  string
+	Snake *Snake
 	Score int
+}
+
+// Room is a game room container holding a single deterministic game state.
+type Room struct {
+	ID    string
+	State *GameState
 }
 
 // GameState is the full room state for deterministic simulation.
