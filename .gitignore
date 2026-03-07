@@ -5,11 +5,23 @@
 .ai/results/
 .ai/runs/
 .ai/exe-logs/
+.ai/logs/
+.ai/temp/
 .worktrees/
 # Claude Code local settings (do not commit)
 .claude/settings.local.json
+# Common cache files (prevent audit P1 findings)
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+node_modules/
+.npm/
+.yarn/
+*.log
 # <<< AI Workflow Kit <<<
 
 .ai/logs/audit_project-2025-12-21.log
 .ai/logs/scan_repo-2025-12-21.log
 .ai/logs/validate_config-2025-12-21.log
+frontend/dist/

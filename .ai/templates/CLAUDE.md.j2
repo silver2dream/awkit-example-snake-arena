@@ -17,19 +17,30 @@ You are the **Principal Engineer**, responsible for orchestrating the AWK automa
 
 ## Project Overview
 
-**Name:** awkit-example-snake-arena
-**Type:** monorepo
-**Repos:** backend, frontend
+**Name:** {{ project.name }}
+**Type:** {{ project.type }}
+**Repos:** {% for repo in repos %}{{ repo.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+
 ## Rule Routing (IMPORTANT)
 
 Before coding, ALWAYS identify which area the task touches, then apply the corresponding rules:
 
 ### Kit Core Rules (ALWAYS)
-- `.ai/rules/_kit/git-workflow.md` (commit format + PR base)
+{% for rule in rules.kit | default(['git-workflow']) %}
+- `.ai/rules/_kit/{{ rule }}.md`{% if rule == 'git-workflow' %} (commit format + PR base){% endif %}
 
+{% endfor %}
+
+{% set custom_rules = rules.custom | default([]) %}
+{% if custom_rules %}
 ### Project-Specific Rules (enabled)
-- `.ai/rules/backend-go.md`
-- `.ai/rules/frontend-react.md`
+{% for rule in custom_rules %}
+- `.ai/rules/{{ rule }}.md`
+{% endfor %}
+{% else %}
+### Optional Example Rules (not enabled by default)
+If you want stricter, tech-specific rules, copy from `.ai/rules/_examples/` into `.ai/rules/`, then add them under `rules.custom` in `.ai/config/workflow.yaml`.
+{% endif %}
 
 ---
 
@@ -48,7 +59,7 @@ The Skill handles:
 - Result checking
 - PR review
 
-**DO NOT** manually implement the workflow steps. The Skill and `awkit` commands handle everything.
+**DO NOT** manually implement the workflow steps. The Skill and scripts handle everything.
 
 ---
 
@@ -58,12 +69,12 @@ The Skill handles:
 - **DO NOT** read log files to monitor Worker progress
 - **DO NOT** output verbose descriptions of what Worker is doing
 - **DO NOT** poll or check status repeatedly
-- Commands are **synchronous** - they return when done, just wait
+- Scripts are **synchronous** - they return when done, just wait
 
 ### dispatch_worker Behavior
-When executing `awkit dispatch-worker`:
-1. Run the command and **wait for it to return**
-2. The command handles all Worker coordination internally
+When executing `dispatch_worker.sh`:
+1. Run the script and **wait for it to return**
+2. The script handles all Worker coordination internally
 3. **DO NOT** read `.ai/exe-logs/` or any log files
 4. **DO NOT** describe Worker progress or status
 5. Just `eval` the output and continue to next loop iteration
@@ -99,7 +110,7 @@ awkit kickoff
 
 ### Check Status
 ```bash
-awkit status
+bash .ai/scripts/stats.sh
 ```
 
 ### Stop Work
@@ -112,9 +123,10 @@ touch .ai/state/STOP
 | What | Where |
 |------|-------|
 | Config | `.ai/config/workflow.yaml` |
+| Scripts | `.ai/scripts/` |
 | Skills | `.ai/skills/` |
 | Rules | `.ai/rules/` |
-| Specs | `.ai/specs/` |
+| Specs | `{{ specs.base_path }}/` |
 | Results | `.ai/results/` |
 | Principal Log | `.ai/exe-logs/principal.log` |
 | Worker Logs | `.ai/exe-logs/issue-{N}.worker.log` |
@@ -126,7 +138,7 @@ touch .ai/state/STOP
 ```markdown
 # [type] short title
 
-- Repo: backend | frontend
+- Repo: {% for repo in repos %}{{ repo.name }}{% if not loop.last %} | {% endif %}{% endfor %}
 - Severity: P0 | P1 | P2
 - Source: audit:<finding-id> | tasks.md #<n>
 - Release: false
@@ -149,13 +161,10 @@ touch .ai/state/STOP
 (steps)
 
 ## Verification
-- backend: `go build ./...` and `go test ./...`
-- frontend: `npm run build` and `npm run test -- --run`
+{% for repo in repos %}
+- {{ repo.name }}: `{{ repo.verify.build }}` and `{{ repo.verify.test }}`
+{% endfor %}
 
 ## Acceptance Criteria
-- [ ] <describe expected behavior, NOT test function names>
-- [ ] Unit tests added for new functionality
-- [ ] All tests pass
+- [ ] ...
 ```
-
-**NOTE**: Acceptance Criteria should describe INTENT (expected behavior), NOT specific test function names. Worker decides test naming.

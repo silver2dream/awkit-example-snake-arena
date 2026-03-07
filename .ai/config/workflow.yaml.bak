@@ -1,0 +1,68 @@
+# AWK Configuration (React + Go)
+version: "1.0"
+
+project:
+  name: "awkit-example-snake-arena"
+  description: "React + Go project using AWK"
+  type: "monorepo"
+
+repos:
+  - name: backend
+    path: backend/
+    type: directory
+    language: go
+    verify:
+      build: "go build ./..."
+      test: "go test ./..."
+
+  - name: frontend
+    path: frontend/
+    type: directory
+    language: typescript
+    node_version: "20"
+    package_manager: "npm"
+    verify:
+      build: "npm run build"
+      test: "npm run test -- --run"
+
+git:
+  integration_branch: "feat/example"
+  release_branch: "main"
+  commit_format: "[type] subject"
+
+specs:
+  base_path: ".ai/specs"
+  files:
+    requirements: "requirements.md"
+    design: "design.md"
+    tasks: "tasks.md"
+  auto_generate_tasks: true
+  active: 
+    - "snake-arena"
+
+tasks:
+  format:
+    uncompleted: "- [ ]"
+    completed: "- [x]"
+    optional: "- [ ]*"
+  source_priority:
+    - audit
+    - specs
+
+audit:
+  checks:
+    - dirty-worktree
+    - submodule-sync
+    - missing-tests
+    - missing-ci
+  custom: []
+
+github:
+  repo: ""
+
+rules:
+  kit:
+    - git-workflow
+  custom:
+    - backend-go
+    - frontend-react
