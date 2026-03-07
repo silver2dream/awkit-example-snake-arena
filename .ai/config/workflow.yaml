@@ -38,8 +38,12 @@ specs:
     design: "design.md"
     tasks: "tasks.md"
   auto_generate_tasks: true
-  active: 
+  active:
    - snake-arena
+  tracking:
+    mode: github_epic
+    epic_issues:
+      snake-arena: 58
 
 tasks:
   format:
